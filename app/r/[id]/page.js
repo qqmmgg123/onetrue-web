@@ -1,14 +1,36 @@
 async function loadMeta(id) {
   const base = (process.env.NEXT_PUBLIC_R2_PUBLIC_BASE || "").replace(/\/+$/, "");
-  if (!base || !id) return null;
-  const url = `${base}/rooms/${id}/meta.json`;
+  if (!base || !id) return { base, meta: null, videoUrl: "" };
+
+  const metaUrl = `${base}/rooms/${id}/meta.json`;
   try {
-    const res = await fetch(url, { next: { revalidate: 30 } });
-    if (!res.ok) return null;
-    return await res.json();
+    const res = await fetch(metaUrl, { next: { revalidate: 30 } });
+    if (res.ok) {
+      const meta = await res.json();
+      return {
+        base,
+        meta,
+        videoUrl: meta.videoUrl || `${base}/rooms/${id}/video.mp4`,
+      };
+    }
   } catch {
-    return null;
+    // fall through：没有 meta 时仍尝试直接播 video.mp4
   }
+
+  const videoUrl = `${base}/rooms/${id}/video.mp4`;
+  try {
+    const head = await fetch(videoUrl, {
+      method: "HEAD",
+      next: { revalidate: 30 },
+    });
+    if (head.ok || head.status === 206) {
+      return { base, meta: null, videoUrl };
+    }
+  } catch {
+    // ignore
+  }
+
+  return { base, meta: null, videoUrl: "" };
 }
 
 function yuan(n) {
@@ -18,7 +40,7 @@ function yuan(n) {
 
 export default async function RoomSharePage({ params }) {
   const id = params?.id || "";
-  const meta = await loadMeta(id);
+  const { base, meta, videoUrl } = await loadMeta(id);
   const downloadUrl =
     meta?.appDownloadUrl || process.env.NEXT_PUBLIC_APP_DOWNLOAD_URL || "";
   const hint =
@@ -26,7 +48,18 @@ export default async function RoomSharePage({ params }) {
     process.env.NEXT_PUBLIC_APP_DOWNLOAD_HINT ||
     "App 下载方式稍后公布";
 
-  if (!meta) {
+  if (!base) {
+    return (
+      <main style={styles.wrap}>
+        <p style={{ color: "#ccc", textAlign: "center", padding: 32 }}>
+          分享站未配置 R2 公开地址（Vercel 环境变量 NEXT_PUBLIC_R2_PUBLIC_BASE）。
+        </p>
+        <Footer hint={hint} downloadUrl={downloadUrl} />
+      </main>
+    );
+  }
+
+  if (!videoUrl) {
     return (
       <main style={styles.wrap}>
         <p style={{ color: "#ccc", textAlign: "center", padding: 32 }}>
@@ -37,32 +70,32 @@ export default async function RoomSharePage({ params }) {
     );
   }
 
-  const title = [meta.propertyName, meta.roomLabel].filter(Boolean).join(" · ");
-  const line2 = meta.tenantName
-    ? `${meta.tenantName} · 月租 ${yuan(meta.rent)}`
-    : `空房 · 月租 ${yuan(meta.rent)}`;
+  const title = meta
+    ? [meta.propertyName, meta.roomLabel].filter(Boolean).join(" · ")
+    : "房间视频";
+  const line2 = meta
+    ? meta.tenantName
+      ? `${meta.tenantName} · 月租 ${yuan(meta.rent)}`
+      : `空房 · 月租 ${yuan(meta.rent)}`
+    : "";
 
   return (
     <main style={styles.wrap}>
       <div style={styles.stage}>
-        {meta.videoUrl ? (
-          <video
-            src={meta.videoUrl}
-            poster={meta.posterUrl || undefined}
-            controls
-            playsInline
-            autoPlay
-            loop
-            muted
-            style={styles.video}
-          />
-        ) : (
-          <p style={{ color: "#aaa" }}>暂无视频</p>
-        )}
+        <video
+          src={videoUrl}
+          poster={meta?.posterUrl || undefined}
+          controls
+          playsInline
+          autoPlay
+          loop
+          muted
+          style={styles.video}
+        />
         <div style={styles.overlay}>
           <div style={styles.title}>{title}</div>
-          <div style={styles.price}>{line2}</div>
-          {meta.propertyAddress ? (
+          {line2 ? <div style={styles.price}>{line2}</div> : null}
+          {meta?.propertyAddress ? (
             <div style={styles.addr}>{meta.propertyAddress}</div>
           ) : null}
         </div>
