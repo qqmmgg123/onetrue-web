@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "房间视频 · 收租助手",
+  title: "房间视频 · 缘初",
   description: "房间短视频分享",
   viewport: "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover",
 };

@@ -1,41 +1,48 @@
-async function loadMeta(id) {
-  const base = (process.env.NEXT_PUBLIC_R2_PUBLIC_BASE || "").replace(/\/+$/, "");
-  if (!base || !id) return { base, meta: null, videoUrl: "" };
+import { loadMeta, cardCopy, siteOrigin, yuan } from "../../../lib/room-meta";
 
-  const metaUrl = `${base}/rooms/${id}/meta.json`;
-  try {
-    const res = await fetch(metaUrl, { next: { revalidate: 30 } });
-    if (res.ok) {
-      const meta = await res.json();
-      return {
-        base,
-        meta,
-        videoUrl: meta.videoUrl || `${base}/rooms/${id}/video.mp4`,
-      };
-    }
-  } catch {
-    // fall through：没有 meta 时仍尝试直接播 video.mp4
-  }
+export async function generateMetadata({ params }) {
+  const id = params?.id || "";
+  const { meta, videoUrl, posterUrl } = await loadMeta(id);
+  const { title, description } = cardCopy(meta, id);
+  const origin = siteOrigin();
+  const pageUrl = origin ? `${origin}/r/${id}` : undefined;
+  // 优先用动态 OG 图（本站 /opengraph-image）；有封面时也写进 images 作兜底
+  const images = posterUrl
+    ? [{ url: posterUrl, width: 720, height: 1280, alt: title }]
+    : undefined;
 
-  const videoUrl = `${base}/rooms/${id}/video.mp4`;
-  try {
-    const head = await fetch(videoUrl, {
-      method: "HEAD",
-      next: { revalidate: 30 },
-    });
-    if (head.ok || head.status === 206) {
-      return { base, meta: null, videoUrl };
-    }
-  } catch {
-    // ignore
-  }
-
-  return { base, meta: null, videoUrl: "" };
-}
-
-function yuan(n) {
-  const v = Number(n) || 0;
-  return `¥${v.toFixed(v % 1 === 0 ? 0 : 2)}`;
+  return {
+    title: `${title} · 缘初`,
+    description,
+    alternates: pageUrl ? { canonical: pageUrl } : undefined,
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      locale: "zh_CN",
+      url: pageUrl,
+      siteName: "缘初",
+      images,
+      videos: videoUrl
+        ? [
+            {
+              url: videoUrl,
+              type: "video/mp4",
+            },
+          ]
+        : undefined,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: posterUrl ? [posterUrl] : undefined,
+    },
+    other: {
+      // 微信等爬虫常用
+      "og:image:alt": title,
+    },
+  };
 }
 
 export default async function RoomSharePage({ params }) {
@@ -52,7 +59,8 @@ export default async function RoomSharePage({ params }) {
     return (
       <main style={styles.wrap}>
         <p style={{ color: "#ccc", textAlign: "center", padding: 32 }}>
-          分享站未配置 R2 公开地址（Vercel 环境变量 NEXT_PUBLIC_R2_PUBLIC_BASE）。
+          分享站未配置媒体公开地址（EdgeOne 环境变量 NEXT_PUBLIC_QINIU_PUBLIC_BASE
+          或 NEXT_PUBLIC_R2_PUBLIC_BASE）。
         </p>
         <Footer hint={hint} downloadUrl={downloadUrl} />
       </main>
@@ -70,9 +78,7 @@ export default async function RoomSharePage({ params }) {
     );
   }
 
-  const title = meta
-    ? [meta.propertyName, meta.roomLabel].filter(Boolean).join(" · ")
-    : "房间视频";
+  const { title } = cardCopy(meta, id);
   const line2 = meta
     ? meta.tenantName
       ? `${meta.tenantName} · 月租 ${yuan(meta.rent)}`
@@ -111,7 +117,7 @@ function Footer({ hint, downloadUrl }) {
       <div style={{ color: "#aaa", fontSize: 13 }}>{hint}</div>
       {downloadUrl ? (
         <a href={downloadUrl} style={{ color: "#8ec7ff", fontSize: 14 }}>
-          下载收租助手 App
+          下载缘初 App
         </a>
       ) : null}
     </footer>

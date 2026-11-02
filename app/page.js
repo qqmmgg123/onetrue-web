@@ -6,7 +6,7 @@ export default function Home() {
 
   return (
     <main style={{ padding: 24, maxWidth: 480, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 22, marginBottom: 8 }}>收租助手</h1>
+      <h1 style={{ fontSize: 22, marginBottom: 8 }}>缘初</h1>
       <p style={{ color: "#bbb", lineHeight: 1.6 }}>
         打开分享链接可看房间竖屏视频。完整记账、抄表、同步请使用 App。
       </p>
