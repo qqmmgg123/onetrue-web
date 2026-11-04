@@ -121,8 +121,21 @@ function Footer({ hint, downloadUrl }) {
     <footer style={styles.footer}>
       <div style={{ color: "#aaa", fontSize: 13 }}>{hint}</div>
       {downloadUrl ? (
-        <a href={downloadUrl} style={{ color: "#8ec7ff", fontSize: 14 }}>
-          下载缘初 App
+        <a
+          href={downloadUrl}
+          download
+          style={{
+            display: "inline-block",
+            marginTop: 4,
+            padding: "8px 12px",
+            border: "1px solid rgba(255,255,255,.45)",
+            borderRadius: 8,
+            color: "#fff",
+            textDecoration: "none",
+            fontSize: 14,
+          }}
+        >
+          下载缘初 AI 推广助手
         </a>
       ) : null}
     </footer>
