@@ -1,4 +1,10 @@
-import { loadMeta, cardCopy, siteOrigin, yuan } from "../../../lib/room-meta";
+import {
+  loadMeta,
+  cardCopy,
+  siteOrigin,
+  yuan,
+  appDownloadUrl,
+} from "../../../lib/room-meta";
 
 export async function generateMetadata({ params }) {
   const id = params?.id || "";
@@ -48,12 +54,11 @@ export async function generateMetadata({ params }) {
 export default async function RoomSharePage({ params }) {
   const id = params?.id || "";
   const { base, meta, videoUrl } = await loadMeta(id);
-  const downloadUrl =
-    meta?.appDownloadUrl || process.env.NEXT_PUBLIC_APP_DOWNLOAD_URL || "";
+  const downloadUrl = appDownloadUrl(meta);
   const hint =
     meta?.appDownloadHint ||
     process.env.NEXT_PUBLIC_APP_DOWNLOAD_HINT ||
-    "App 下载方式稍后公布";
+    "点击下载缘初 App（Android）";
 
   if (!base) {
     return (
