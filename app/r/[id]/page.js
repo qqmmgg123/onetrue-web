@@ -53,7 +53,7 @@ export async function generateMetadata({ params }) {
 
 export default async function RoomSharePage({ params }) {
   const id = params?.id || "";
-  const { base, meta, videoUrl } = await loadMeta(id);
+  const { base, meta, videoUrl, tried } = await loadMeta(id);
   const downloadUrl = appDownloadUrl(meta);
   const hint =
     meta?.appDownloadHint ||
@@ -77,6 +77,25 @@ export default async function RoomSharePage({ params }) {
       <main style={styles.wrap}>
         <p style={{ color: "#ccc", textAlign: "center", padding: 32 }}>
           还没有这个房间的视频，或链接已失效。
+        </p>
+        <p
+          style={{
+            color: "#666",
+            fontSize: 12,
+            padding: "0 24px 16px",
+            wordBreak: "break-all",
+            lineHeight: 1.5,
+          }}
+        >
+          房间 id：{id || "(空)"}
+          <br />
+          已尝试：
+          <br />
+          {(tried || []).join("\n") || "(无)"}
+          <br />
+          请确认 App 已成功上传该房间视频，且 EdgeOne 的
+          NEXT_PUBLIC_QINIU_PUBLIC_BASE 与 App 的 QINIU_PUBLIC_BASE
+          一致（当前应为 http://storage.otrue.top）。
         </p>
         <Footer hint={hint} downloadUrl={downloadUrl} />
       </main>
