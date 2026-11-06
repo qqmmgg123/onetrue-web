@@ -1,3 +1,4 @@
+import DownloadAppButton from "../../../components/DownloadAppButton";
 import {
   loadMeta,
   cardCopy,
@@ -58,7 +59,7 @@ export default async function RoomSharePage({ params }) {
   const hint =
     meta?.appDownloadHint ||
     process.env.NEXT_PUBLIC_APP_DOWNLOAD_HINT ||
-    "点击下载缘初 App（Android）";
+    "已安装则打开 App；未安装请下载（Android）";
 
   if (!base) {
     return (
@@ -67,7 +68,7 @@ export default async function RoomSharePage({ params }) {
           分享站未配置媒体公开地址（EdgeOne 环境变量 NEXT_PUBLIC_QINIU_PUBLIC_BASE
           或 NEXT_PUBLIC_R2_PUBLIC_BASE）。
         </p>
-        <Footer hint={hint} downloadUrl={downloadUrl} />
+        <Footer hint={hint} downloadUrl={downloadUrl} roomId={id} />
       </main>
     );
   }
@@ -93,11 +94,13 @@ export default async function RoomSharePage({ params }) {
           <br />
           {(tried || []).join("\n") || "(无)"}
           <br />
-          请确认 App 已成功上传该房间视频，且 EdgeOne 的
-          NEXT_PUBLIC_QINIU_PUBLIC_BASE 与 App 的 QINIU_PUBLIC_BASE
-          一致（当前应为 http://storage.otrue.top）。
+          说明：新版上传文件名是 video_时间戳.mp4，分享页必须能读到
+          meta.json（里面有真实 videoUrl）。若空间里只有视频没有
+          meta.json，请用最新 App 对该房间重新上传一次。
+          EdgeOne 的 NEXT_PUBLIC_QINIU_PUBLIC_BASE 应为
+          http://storage.otrue.top。
         </p>
-        <Footer hint={hint} downloadUrl={downloadUrl} />
+        <Footer hint={hint} downloadUrl={downloadUrl} roomId={id} />
       </main>
     );
   }
@@ -130,32 +133,26 @@ export default async function RoomSharePage({ params }) {
           ) : null}
         </div>
       </div>
-      <Footer hint={hint} downloadUrl={downloadUrl} />
+      <Footer hint={hint} downloadUrl={downloadUrl} roomId={id} />
     </main>
   );
 }
 
-function Footer({ hint, downloadUrl }) {
+function Footer({ hint, downloadUrl, roomId }) {
   return (
     <footer style={styles.footer}>
       <div style={{ color: "#aaa", fontSize: 13 }}>{hint}</div>
       {downloadUrl ? (
-        <a
-          href={downloadUrl}
-          download
+        <DownloadAppButton
+          downloadUrl={downloadUrl}
+          roomId={roomId || ""}
           style={{
-            display: "inline-block",
             marginTop: 4,
             padding: "8px 12px",
-            border: "1px solid rgba(255,255,255,.45)",
-            borderRadius: 8,
-            color: "#fff",
-            textDecoration: "none",
             fontSize: 14,
+            border: "1px solid rgba(255,255,255,.45)",
           }}
-        >
-          下载缘初 AI 推广助手
-        </a>
+        />
       ) : null}
     </footer>
   );

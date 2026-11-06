@@ -1,10 +1,11 @@
+import DownloadAppButton from "../components/DownloadAppButton";
 import { appDownloadUrl } from "../lib/room-meta";
 
 export default function Home() {
   const downloadUrl = appDownloadUrl(null);
   const hint =
     process.env.NEXT_PUBLIC_APP_DOWNLOAD_HINT ||
-    "点击下载缘初 App（Android）";
+    "已安装则直接打开；未安装请下载缘初 App（Android）";
 
   return (
     <main style={{ padding: 24, maxWidth: 480, margin: "0 auto" }}>
@@ -32,21 +33,7 @@ export default function Home() {
       <p style={{ marginTop: 24, color: "#ddd" }}>{hint}</p>
       {downloadUrl ? (
         <p style={{ marginTop: 16 }}>
-          <a
-            href={downloadUrl}
-            download
-            style={{
-              display: "inline-block",
-              padding: "10px 16px",
-              border: "1px solid rgba(255,255,255,.55)",
-              borderRadius: 8,
-              color: "#fff",
-              textDecoration: "none",
-              fontSize: 15,
-            }}
-          >
-            下载缘初 AI 推广助手
-          </a>
+          <DownloadAppButton downloadUrl={downloadUrl} />
         </p>
       ) : (
         <p style={{ marginTop: 16, color: "#888", fontSize: 13 }}>
@@ -54,6 +41,9 @@ export default function Home() {
           NEXT_PUBLIC_APP_DOWNLOAD_URL）
         </p>
       )}
+      <p style={{ marginTop: 20, color: "#666", fontSize: 12, lineHeight: 1.5 }}>
+        若在微信里打开本页：点下载后按提示，从右上角 ···「在浏览器打开」再安装。
+      </p>
     </main>
   );
 }
