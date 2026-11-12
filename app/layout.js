@@ -1,14 +1,22 @@
+import "./globals.css";
+
 export const metadata = {
-  title: "房间视频 · 缘初",
-  description: "房间短视频分享",
-  viewport: "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover",
+  title: "醍醐",
+  description: "笔记 · 市集 · 关注 — 黑白灰简约 Web",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="zh-CN">
-      <body style={{ margin: 0, background: "#000", color: "#fff", fontFamily: "system-ui, sans-serif" }}>
-        {children}
+      <body>
+        <div className="app-root">{children}</div>
       </body>
     </html>
   );

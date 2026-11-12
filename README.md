@@ -1,67 +1,61 @@
-# 房间视频分享站（EdgeOne Makers）
+# 醍醐 Web（share-web）
 
-竖屏网页播放七牛/R2 上的房间视频，底部展示月租。面向国内访问与微信打开。
+App「醍醐」的桌面 Web 版：三栏布局（参考微信 / 小红书 / Slack），黑白灰简约风格。
 
-> 原 Vercel 部署可继续用，但国内/微信常不可达；推荐迁到腾讯云 **EdgeOne Makers** 免费版。
+## 架构（网关试点）
 
-## 环境变量（EdgeOne 项目设置）
+浏览器 / 日后 App **只访问本站 Next.js `/api/*`**，由 EdgeOne（或本机）上的 Node **服务端**再访问 Supabase。  
+用于解决国内客户端直连 `*.supabase.co` 失败、需开代理的问题。
+
+| 路径 | 说明 |
+| --- | --- |
+| `GET /api/health` | 探活：网关 → Supabase 是否通 |
+| `POST /api/auth/login` | 登录（Cookie + 返回 tokens 供 App Bearer） |
+| `POST /api/auth/logout` | 退出 |
+| `GET /api/auth/me` | 当前用户 |
+| `GET /api/articles` | 市集文章列表 `?city=&ownerId=` |
+| `GET /api/articles/[id]` | 文章详情 |
+
+Web 端登录与文章列表/详情已走上述接口。评论/关注等仍有过渡期直连，后续继续迁到 `/api`。
+
+## 功能
+
+- **求索**：市集文章流、陋室、文章阅读与分享 `/a/{id}`
+- **关注 / 醍醐 / 找 AI / 我的**：见界面
+
+## 环境变量
+
+复制 `.env.example` → `.env.local`：
 
 | 变量 | 说明 |
 | --- | --- |
-| `NEXT_PUBLIC_QINIU_PUBLIC_BASE` | **推荐** 七牛公开前缀，如 `http://xxx.clouddn.com` |
-| `NEXT_PUBLIC_R2_PUBLIC_BASE` | R2 公开前缀（备用） |
-| `NEXT_PUBLIC_SHARE_WEB_BASE` | 本站根地址（OG 规范链接），与 EdgeOne 域名一致 |
-| `NEXT_PUBLIC_APP_DOWNLOAD_URL` | App 下载页（可空） |
-| `NEXT_PUBLIC_APP_DOWNLOAD_HINT` | 下载说明文案 |
+| `SUPABASE_URL` | 服务端用（推荐） |
+| `SUPABASE_ANON_KEY` | 服务端用 |
+| `NEXT_PUBLIC_SITE_URL` | 本站根地址 |
+| `NEXT_PUBLIC_APP_DOWNLOAD_URL` | 可选 |
 
-`meta.json` 里已有完整 `videoUrl` / `posterUrl` 时，页面会优先用其中的绝对地址。
+未设 `SUPABASE_*` 时会回退 `NEXT_PUBLIC_SUPABASE_*`。
 
-## 部署到 EdgeOne Makers（免费）
-
-1. 打开 [EdgeOne Makers](https://pages.edgeone.ai/) / 腾讯云控制台，用微信或腾讯云账号开通 **免费版**。
-2. 新建项目 → 导入本仓库的 `share-web` 目录（或单独拆仓库），框架选 **Next.js**。
-3. 构建命令：`npm install && npm run build`；输出按 Next 默认（非纯静态，保留 SSR/`opengraph-image`）。
-4. 在项目环境变量里填上表各项，保存后 **重新部署**。
-5. 得到站点域名后，写入 App 的 `supabase/env.local`：
-
-```
-SHARE_WEB_BASE=https://你的edgeone域名
-```
-
-然后重新 `.\build_apk.ps1 -Install`。
-
-自定义已备案域名可在 Makers「域名管理」绑定，微信内打开更稳。
-
-## App 微信卡片分享
-
-系统「分享文本链接」在微信里经常没有图文卡。App 已接 **微信开放平台 SDK（fluwx）**：
-
-1. 到 [微信开放平台](https://open.weixin.qq.com) 创建 **移动应用**。
-2. Android：包名 `com.local.rent.rent_agent`，签名为 **release 所用 keystore 的 MD5**（当前 release 若仍是 debug 签名，填 debug 的 MD5；以后换正式签名要改后台）。
-3. 把 AppID 写入 `supabase/env.local`：
-
-```
-WECHAT_APP_ID=wx你的AppId
-# iOS 再填通用链接
-WECHAT_UNIVERSAL_LINK=
-```
-
-4. 重新打包。视频页点「分享网页」→ **微信好友 / 朋友圈**，会传入标题、描述、封面缩略图。
-
-审核通过前，分享仅对开放平台配置的体验账号可见。
-
-## 分享卡片（网页 OG）
-
-每个 `/r/{id}` 仍会生成 `og:title` / `og:description` / 封面图，供浏览器或其它 App 抓取。  
-**微信会话里的正式卡片**以开放平台 SDK 传入的 Title / Description / Thumbnail 为准。
-
-## 本地开发
+## 本地验证（无代理）
 
 ```bash
 cd share-web
-npm i
-# 复制 .env.example → .env.local 并填写
 npm run dev
 ```
 
-分享链接格式：`{SHARE_WEB_BASE}/r/{roomUuid}`
+1. 打开 http://localhost:3000 — 求索应能出文章（经 `/api/articles`）
+2. `curl http://localhost:3000/api/health` — `ok: true` 且 `supabase: true`
+3. 登录走 `/api/auth/login`，Cookie 写入后 `/api/auth/me` 有用户
+
+部署到 EdgeOne 后，在**不开代理**的网络再测一遍 `/api/health` 与首页，即可确认「国内可访问」。
+
+## App 对接（下一步）
+
+- Base URL：你的 EdgeOne 域名
+- 登录：`POST /api/auth/login`，用返回的 `tokens.access_token` 作 `Authorization: Bearer …`
+- 文章：`GET /api/articles`、`GET /api/articles/:id`（可带 Bearer）
+
+## 部署
+
+EdgeOne Makers / Vercel：Next.js，`npm install && npm run build`。  
+环境变量在控制台配置 `SUPABASE_URL` / `SUPABASE_ANON_KEY`。
