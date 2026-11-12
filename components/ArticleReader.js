@@ -4,10 +4,7 @@ import { useEffect, useState } from "react";
 import {
   addComment,
   fetchProfiles,
-  hasFavorited,
-  hasRecommended,
-  incrementArticleView,
-  isFollowing,
+  fetchSocialStatus,
   listComments,
   toggleFavorite,
   toggleFollow,
@@ -45,22 +42,20 @@ export default function ArticleReader({
         const cs = await listComments(article.id);
         if (alive) setComments(cs);
         if (isLoggedIn) {
-          const [r, f, fl] = await Promise.all([
-            hasRecommended(article.id),
-            hasFavorited(article.id),
-            isFollowing(article.ownerId),
-          ]);
+          const st = await fetchSocialStatus({
+            noteId: article.id,
+            ownerId: article.ownerId,
+          });
           if (alive) {
-            setRecommended(r);
-            setFavorited(f);
-            setFollowing(fl);
+            setRecommended(Boolean(st?.recommended));
+            setFavorited(Boolean(st?.favorited));
+            setFollowing(Boolean(st?.following));
           }
         } else if (alive) {
           setRecommended(false);
           setFavorited(false);
           setFollowing(false);
         }
-        await incrementArticleView(article.id, user?.id || "");
       } catch (e) {
         toast?.(e.message || "加载失败");
       }

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { upsertMyProfile } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { uploadMyAvatar, upsertMyProfile } from "../lib/api";
 import { appDownloadHint, appDownloadUrl } from "../lib/site";
 import { useAuth } from "./AuthProvider";
 import AuthPanel from "./AuthPanel";
+import UserAvatar from "./UserAvatar";
 
 export default function SettingsPanel({ toast }) {
   const {
@@ -18,6 +19,11 @@ export default function SettingsPanel({ toast }) {
   } = useAuth();
   const [nick, setNick] = useState(profile?.nickname || "");
   const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    setNick(profile?.nickname || "");
+  }, [profile?.nickname]);
 
   if (!isLoggedIn) {
     return <AuthPanel />;
@@ -37,6 +43,49 @@ export default function SettingsPanel({ toast }) {
             ? " · 网关异常"
             : ""}
       </p>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          marginBottom: 20,
+        }}
+      >
+        <UserAvatar profile={profile} size="lg" />
+        <div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              setBusy(true);
+              try {
+                const data = await uploadMyAvatar(file);
+                if (data?.profile) setProfile(data.profile);
+                await refreshProfile();
+                toast?.("头像已更新");
+              } catch (err) {
+                toast?.(err.message || "上传失败");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+          <button
+            className="btn ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            上传头像
+          </button>
+        </div>
+      </div>
 
       <div className="field">
         <label>昵称</label>
@@ -76,11 +125,7 @@ export default function SettingsPanel({ toast }) {
         ) : null}
         <div className="row">
           <span>API 网关</span>
-          <span className="sub">/api/auth · /api/articles</span>
-        </div>
-        <div className="row">
-          <span>数据同步</span>
-          <span className="sub">登录后自动归属当前账号</span>
+          <span className="sub">EdgeOne → Supabase</span>
         </div>
         <button
           type="button"

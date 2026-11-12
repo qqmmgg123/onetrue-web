@@ -5,7 +5,7 @@ import { chatWithAi } from "../lib/api";
 import { useAuth } from "./AuthProvider";
 
 const WELCOME =
-  "可以随便聊；也能帮你整理想法、写大纲。\n完整记笔记、备忘与日程请用 App「作为」。";
+  "可以随便聊；也能帮你整理想法、写大纲。\n左侧「醍醐」可写笔记；复杂日程仍建议用 App。";
 
 export default function AiChat({ onNeedLogin, toast }) {
   const { isLoggedIn } = useAuth();

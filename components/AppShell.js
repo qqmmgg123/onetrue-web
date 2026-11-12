@@ -10,7 +10,6 @@ import {
   fetchProfiles,
 } from "../lib/api";
 import { displayTitle, excerpt, formatWhen, snippet } from "../lib/format";
-import { hasSupabase } from "../lib/supabase";
 import AiChat from "./AiChat";
 import ArticleFeed from "./ArticleFeed";
 import ArticleReader from "./ArticleReader";
@@ -24,6 +23,7 @@ import {
   IconMe,
   IconSearch,
 } from "./icons";
+import NoteEditor from "./NoteEditor";
 import SettingsPanel from "./SettingsPanel";
 import UserAvatar from "./UserAvatar";
 
@@ -55,7 +55,7 @@ export default function AppShell({ initialArticleId = "" }) {
   const [notices, setNotices] = useState([]);
   const [profiles, setProfiles] = useState({});
   const [selected, setSelected] = useState(null);
-  const [mode, setMode] = useState("feed"); // feed | reader | auth | author
+  const [mode, setMode] = useState("feed"); // feed | reader | auth | author | compose
   const [authorId, setAuthorId] = useState("");
   const [authorArticles, setAuthorArticles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -79,10 +79,6 @@ export default function AppShell({ initialArticleId = "" }) {
   }, []);
 
   const refreshExplore = useCallback(async () => {
-    if (!hasSupabase()) {
-      setArticles([]);
-      return;
-    }
     const list = await fetchListedArticles();
     setArticles(list);
     await loadProfilesFor(list);
@@ -221,6 +217,7 @@ export default function AppShell({ initialArticleId = "" }) {
   }
 
   const mainTitle = (() => {
+    if (mode === "compose") return "写笔记";
     if (mode === "auth") return "登录";
     if (mode === "reader" && selected) return displayTitle(selected.title, selected.body);
     if (mode === "author") return profiles[authorId]?.displayName || "陋室";
@@ -361,7 +358,17 @@ export default function AppShell({ initialArticleId = "" }) {
 
           {nav === "hub" && isLoggedIn && hubSection === "notes" ? (
             notes.length === 0 ? (
-              <div className="empty">暂无云端笔记。可在 App 中创建并同步。</div>
+              <div className="empty">
+                暂无云端笔记。
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ marginTop: 12 }}
+                  onClick={() => setMode("compose")}
+                >
+                  写一篇
+                </button>
+              </div>
             ) : (
               notes.map((n) => (
                 <button
@@ -476,13 +483,26 @@ export default function AppShell({ initialArticleId = "" }) {
         <div className="main-head">
           <h2>{mainTitle}</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {mode === "reader" || mode === "author" ? (
+            {mode === "reader" || mode === "author" || mode === "compose" ? (
               <button
                 type="button"
                 className="btn ghost"
                 onClick={() => setMode("feed")}
               >
                 返回
+              </button>
+            ) : null}
+            {isLoggedIn && mode !== "compose" ? (
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  setNav("hub");
+                  setHubSection("notes");
+                  setMode("compose");
+                }}
+              >
+                写笔记
               </button>
             ) : null}
             {!isLoggedIn && nav !== "me" ? (
@@ -502,6 +522,35 @@ export default function AppShell({ initialArticleId = "" }) {
         <div className="main-body">
           {loading || authLoading ? (
             <div className="loading">加载中…</div>
+          ) : mode === "compose" ? (
+            <NoteEditor
+              toast={showToast}
+              onCancel={() => setMode("feed")}
+              onCreated={async (note) => {
+                await refreshHub().catch(() => {});
+                await refreshExplore().catch(() => {});
+                await refreshMine().catch(() => {});
+                if (note?.listingStatus === "listed") {
+                  setSelected({
+                    id: note.id,
+                    title: note.title,
+                    body: note.body,
+                    format: note.format,
+                    city: note.city || "",
+                    listedAt: note.listedAt || note.updatedAt,
+                    ownerId: note.ownerId || user?.id || "",
+                    viewCount: 0,
+                    recommendCount: 0,
+                    commentCount: 0,
+                  });
+                  setMode("reader");
+                  setNav("explore");
+                } else {
+                  setMode("feed");
+                  setHubSection("notes");
+                }
+              }}
+            />
           ) : mode === "auth" || (nav === "me" && !isLoggedIn) ? (
             <AuthPanel
               onDone={() => {
