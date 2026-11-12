@@ -78,6 +78,9 @@ export async function POST(request) {
   const city = String(body.city || "").trim();
   const now = new Date().toISOString();
   const id = body.id || randomUUID();
+  const scheduleAt = body.scheduleAt
+    ? new Date(body.scheduleAt).toISOString()
+    : null;
 
   if (!text.trim() && !title) {
     return NextResponse.json({ error: "请填写标题或正文" }, { status: 400 });
@@ -89,7 +92,13 @@ export async function POST(request) {
     kind,
     title:
       title ||
-      (kind === "article" ? "无标题文章" : kind === "memo" ? "备忘" : "随笔"),
+      (kind === "article"
+        ? "无标题文章"
+        : kind === "memo"
+          ? "备忘"
+          : kind === "schedule"
+            ? "日程"
+            : "随笔"),
     body: text,
     format: body.format || "plain",
     listing_status: listingStatus,
@@ -97,6 +106,7 @@ export async function POST(request) {
     updated_at: now,
     created_at: now,
     listed_at: listingStatus === "listed" ? now : null,
+    schedule_at: scheduleAt,
     deleted_at: null,
   };
 

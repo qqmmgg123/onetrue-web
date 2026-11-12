@@ -15,9 +15,9 @@
    Collecting build traces ...
 
 Route (app)                              Size     First Load JS
-┌ ○ /                                    274 B          98.6 kB
+┌ ○ /                                    275 B           100 kB
 ├ ○ /_not-found                          872 B          87.9 kB
-├ ƒ /a/[id]                              181 B          98.5 kB
+├ ƒ /a/[id]                              182 B           100 kB
 ├ ƒ /api/ai/chat                         0 B                0 B
 ├ ƒ /api/articles                        0 B                0 B
 ├ ƒ /api/articles/[id]                   0 B                0 B
@@ -28,6 +28,7 @@ Route (app)                              Size     First Load JS
 ├ ƒ /api/notes                           0 B                0 B
 ├ ƒ /api/profile                         0 B                0 B
 ├ ƒ /api/profile/avatar                  0 B                0 B
+├ ƒ /api/profile/avatar-token            0 B                0 B
 ├ ƒ /api/sb                              0 B                0 B
 ├ ƒ /api/sb/[...path]                    0 B                0 B
 ├ ƒ /api/sb/auth/v1/[...path]            0 B                0 B

@@ -104,7 +104,7 @@ export default function ArticleReader({
           <div className="sub">
             {formatWhen(article.listedAt)}
             {article.viewCount != null ? ` · ${article.viewCount} 阅读` : ""}
-            {` · ${recCount} 推荐 · ${article.commentCount || comments.length} 评论`}
+            {` · ${recCount} 推荐 · ${article.commentCount || comments.length} 评点`}
           </div>
         </div>
         <div style={{ flex: 1 }} />
@@ -116,11 +116,11 @@ export default function ArticleReader({
               guard(async () => {
                 const next = await toggleFollow(article.ownerId);
                 setFollowing(next);
-                toast?.(next ? "已关注" : "已取消关注");
+                toast?.(next ? "已留意" : "已取消留意");
               })
             }
           >
-            {following ? "已关注" : "关注"}
+            {following ? "已留意" : "留意"}
           </button>
         ) : null}
         {onOpenAuthor ? (
@@ -184,10 +184,10 @@ export default function ArticleReader({
       </div>
 
       <div className="comments">
-        <h3>评论</h3>
+        <h3>评点</h3>
         {comments.length === 0 ? (
           <div className="empty" style={{ padding: "16px 0" }}>
-            还没有评论
+            还没有评点
           </div>
         ) : (
           comments.map((c) => (
@@ -206,7 +206,7 @@ export default function ArticleReader({
                   <span className="when">{formatWhen(c.createdAt)}</span>
                 </div>
                 <div className="text">
-                  {c.replyToNickname ? `回复 ${c.replyToNickname}：` : ""}
+                  {c.replyToNickname ? `回书 ${c.replyToNickname}：` : ""}
                   {c.body}
                 </div>
               </div>
@@ -231,7 +231,7 @@ export default function ArticleReader({
           <input
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
-            placeholder={isLoggedIn ? "写一条评论…" : "登录后评论"}
+            placeholder={isLoggedIn ? "写一条评点…" : "登录后评点"}
             disabled={!isLoggedIn || busy}
           />
           <button className="btn" type="submit" disabled={!isLoggedIn || busy}>

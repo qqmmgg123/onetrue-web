@@ -70,7 +70,7 @@ export async function POST(request) {
   const parentId = String(body.parentId || "").trim();
   const replyToUserId = String(body.replyToUserId || "").trim();
   if (!noteId || !text) {
-    return NextResponse.json({ error: "评论不能为空" }, { status: 400 });
+    return NextResponse.json({ error: "评点不能为空" }, { status: 400 });
   }
   const payload = {
     note_id: noteId,

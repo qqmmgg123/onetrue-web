@@ -2,19 +2,37 @@
 
 import { useEffect, useRef, useState } from "react";
 import { chatWithAi } from "../lib/api";
+import {
+  createChatSession,
+  getChatSession,
+  updateChatSession,
+} from "../lib/chat-store";
 import { useAuth } from "./AuthProvider";
 
-const WELCOME =
-  "可以随便聊；也能帮你整理想法、写大纲。\n左侧「醍醐」可写笔记；复杂日程仍建议用 App。";
-
-export default function AiChat({ onNeedLogin, toast }) {
+export default function AiChat({
+  sessionId,
+  onSessionChange,
+  onNeedLogin,
+  toast,
+}) {
   const { isLoggedIn } = useAuth();
-  const [messages, setMessages] = useState([
-    { role: "assistant", content: WELCOME },
-  ]);
+  const [sid, setSid] = useState(sessionId || "");
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const logRef = useRef(null);
+
+  useEffect(() => {
+    let id = sessionId;
+    if (!id) {
+      const s = createChatSession();
+      id = s.id;
+      onSessionChange?.(id);
+    }
+    setSid(id);
+    const s = getChatSession(id);
+    setMessages(s?.messages || []);
+  }, [sessionId]);
 
   useEffect(() => {
     const el = logRef.current;
@@ -32,17 +50,27 @@ export default function AiChat({ onNeedLogin, toast }) {
     setMessages(next);
     setInput("");
     setBusy(true);
+    const title =
+      next.find((m) => m.role === "user")?.content?.slice(0, 24) || "新对话";
+    updateChatSession(sid, { messages: next, title });
     try {
       const reply = await chatWithAi(
         next.filter((m) => m.role === "user" || m.role === "assistant"),
       );
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+      const withReply = [...next, { role: "assistant", content: reply }];
+      setMessages(withReply);
+      updateChatSession(sid, { messages: withReply, title });
     } catch (e) {
       toast?.(e.message || "AI 失败");
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `（出错）${e.message || "请稍后重试"}` },
-      ]);
+      const withErr = [
+        ...next,
+        {
+          role: "assistant",
+          content: `（出错）${e.message || "请稍后重试"}`,
+        },
+      ];
+      setMessages(withErr);
+      updateChatSession(sid, { messages: withErr });
     } finally {
       setBusy(false);
     }

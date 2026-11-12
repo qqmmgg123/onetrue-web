@@ -36,7 +36,7 @@ export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const target = String(body.userId || "").trim();
   if (!target || target === user.id) {
-    return NextResponse.json({ error: "不能关注自己" }, { status: 400 });
+    return NextResponse.json({ error: "不能留意自己" }, { status: 400 });
   }
   const existing = await restGet(
     `/follows?select=follower_id&follower_id=eq.${user.id}&following_id=eq.${target}&limit=1`,
@@ -61,7 +61,7 @@ export async function POST(request) {
         user_id: target,
         actor_id: user.id,
         kind: "follow",
-        body: "关注了你",
+        body: "留意了你",
       },
       { accessToken: token, prefer: "return=minimal" },
     );

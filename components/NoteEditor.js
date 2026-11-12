@@ -3,41 +3,54 @@
 import { useState } from "react";
 import { createNote } from "../lib/api";
 
-export default function NoteEditor({ onCreated, onCancel, toast }) {
+export default function NoteEditor({
+  onCreated,
+  onCancel,
+  toast,
+  initialScheduleAt = null,
+}) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [kind, setKind] = useState("note");
+  const [kind, setKind] = useState(initialScheduleAt ? "schedule" : "note");
   const [listIt, setListIt] = useState(false);
   const [city, setCity] = useState("");
   const [busy, setBusy] = useState(false);
 
   return (
     <div className="panel" style={{ maxWidth: 640 }}>
-      <h2>写笔记</h2>
-      <p className="hint">保存到云端；勾选上架后会出现在求索市集。</p>
+      <h2>{initialScheduleAt ? "新建日程" : "写笔记"}</h2>
+      <p className="hint">
+        保存到云端；文章勾选上架后会出现在求索雅集。
+        {initialScheduleAt
+          ? ` 日程时间：${new Date(initialScheduleAt).toLocaleString()}`
+          : ""}
+      </p>
 
-      <div className="field">
-        <label>类型</label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[
-            ["note", "随笔"],
-            ["memo", "备忘"],
-            ["article", "文章"],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`btn ghost ${kind === id ? "on" : ""}`}
-              onClick={() => {
-                setKind(id);
-                if (id === "article") setListIt(true);
-              }}
-            >
-              {label}
-            </button>
-          ))}
+      {!initialScheduleAt ? (
+        <div className="field">
+          <label>类型</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[
+              ["note", "随笔"],
+              ["memo", "备忘"],
+              ["schedule", "日程"],
+              ["article", "文章"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={`btn ghost ${kind === id ? "on" : ""}`}
+                onClick={() => {
+                  setKind(id);
+                  if (id === "article") setListIt(true);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="field">
         <label>标题</label>
@@ -61,7 +74,7 @@ export default function NoteEditor({ onCreated, onCancel, toast }) {
       {kind === "article" ? (
         <>
           <div className="field">
-            <label>城市（可选，市集筛选）</label>
+            <label>城市（可选）</label>
             <input
               value={city}
               onChange={(e) => setCity(e.target.value)}
@@ -82,7 +95,7 @@ export default function NoteEditor({ onCreated, onCancel, toast }) {
               checked={listIt}
               onChange={(e) => setListIt(e.target.checked)}
             />
-            上架到求索市集
+            上架到雅集
           </label>
         </>
       ) : null}
@@ -102,9 +115,10 @@ export default function NoteEditor({ onCreated, onCancel, toast }) {
                 city,
                 listingStatus:
                   kind === "article" && listIt ? "listed" : "draft",
+                scheduleAt: initialScheduleAt || undefined,
               });
               toast?.(
-                note?.listingStatus === "listed" ? "已上架" : "已保存",
+                note?.listingStatus === "listed" ? "已上架雅集" : "已保存",
               );
               onCreated?.(note);
             } catch (e) {
