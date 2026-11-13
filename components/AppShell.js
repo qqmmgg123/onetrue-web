@@ -22,7 +22,14 @@ import ArticleReader from "./ArticleReader";
 import AuthPanel from "./AuthPanel";
 import { useAuth } from "./AuthProvider";
 import CalendarPanel from "./CalendarPanel";
-import { IconCalendar, IconMore, IconTihu, IconExplore, IconEdit } from "./icons";
+import {
+  IconCalendar,
+  IconMore,
+  IconTihu,
+  IconExplore,
+  IconEdit,
+  IconMenu,
+} from "./icons";
 import NoteEditor from "./NoteEditor";
 import SettingsPanel from "./SettingsPanel";
 import SupportPanel from "./SupportPanel";
@@ -37,10 +44,15 @@ const NAV = [
 ];
 
 export default function AppShell({ initialArticleId = "" }) {
-  const { isLoggedIn, loading: authLoading, user } = useAuth();
+  const {
+    isLoggedIn,
+    loading: authLoading,
+    user,
+    authExpiredTick,
+  } = useAuth();
   const [nav, setNav] = useState("tihu");
   const [exploreTab, setExploreTab] = useState("market");
-  const [hubView, setHubView] = useState("home"); // home | todos | notes | reads | fav | follow | inbox
+  const [hubView, setHubView] = useState("todos"); // home | todos | notes | reads | fav | follow | inbox
   const [calendarView, setCalendarView] = useState("week"); // week | month
   const [otherTab, setOtherTab] = useState("settings"); // settings | support
   const [query] = useState("");
@@ -66,6 +78,21 @@ export default function AppShell({ initialArticleId = "" }) {
   const [composeNote, setComposeNote] = useState(null);
   const [recentReads, setRecentReads] = useState([]);
   const [highlightCommentId, setHighlightCommentId] = useState("");
+  const [narrow, setNarrow] = useState(false);
+  const [railOpen, setRailOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mq = window.matchMedia("(max-width: 860px)");
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (!narrow) setRailOpen(false);
+  }, [narrow]);
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -274,17 +301,31 @@ export default function AppShell({ initialArticleId = "" }) {
     }
   }
 
-  function needLogin() {
+  function needLogin(msg = "请先登录") {
     setNav("other");
+    setOtherTab("settings");
     setMode("auth");
-    showToast("请先登录");
+    showToast(msg);
   }
 
+  useEffect(() => {
+    if (!authExpiredTick) return;
+    needLogin("登录已过期，请重新登录");
+    // needLogin / showToast 稳定即可；只跟过期事件走
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authExpiredTick]);
+
   function goNav(id) {
+    setRailOpen(false);
     if (id === "act") {
       setNav("act");
       if (!isLoggedIn) {
         needLogin();
+        return;
+      }
+      // 窄屏：作为默认停在「新笔记」Tab；宽屏仍直接进编辑
+      if (narrow) {
+        setMode("feed");
         return;
       }
       openCompose(null, { kind: null });
@@ -298,7 +339,10 @@ export default function AppShell({ initialArticleId = "" }) {
     }
     setNav(id);
     setMode("feed");
-    if (id === "tihu") setHubView("home");
+    if (id === "tihu") {
+      setHubView("todos");
+      refreshHub().catch(() => {});
+    }
     if (id === "calendar") {
       if (!isLoggedIn) {
         needLogin();
@@ -314,6 +358,7 @@ export default function AppShell({ initialArticleId = "" }) {
   function openActAi() {
     if (!isLoggedIn) return needLogin();
     setNav("act");
+    setRailOpen(false);
     if (!chatId) {
       const s = createChatSession();
       setChatId(s.id);
@@ -330,6 +375,7 @@ export default function AppShell({ initialArticleId = "" }) {
     setMode("feed");
     setSelected(null);
     setHighlightCommentId("");
+    setRailOpen(false);
     try {
       if (view === "reads") {
         refreshReads();
@@ -341,9 +387,47 @@ export default function AppShell({ initialArticleId = "" }) {
       }
       await refreshHub();
     } catch (e) {
-      showToast(e.message || "加载失败");
+      if (e?.authExpired) needLogin("登录已过期，请重新登录");
+      else showToast(e.message || "加载失败");
     }
   }
+
+  function backToTihuHome() {
+    setHubView("home");
+    setMode("feed");
+    setSelected(null);
+    setHighlightCommentId("");
+  }
+
+  const tihuDrilled =
+    narrow &&
+    nav === "tihu" &&
+    (hubView !== "home" ||
+      mode === "reader" ||
+      mode === "author" ||
+      mode === "compose" ||
+      mode === "ai");
+
+  const shellClass = [
+    "shell",
+    narrow ? "is-narrow" : "",
+    railOpen ? "rail-open" : "",
+    narrow && nav === "tihu" ? "tihu-mobile" : "",
+    tihuDrilled ? "tihu-drilled" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const menuBtn = (
+    <button
+      type="button"
+      className="mobile-menu-btn"
+      aria-label={railOpen ? "收起菜单" : "打开菜单"}
+      onClick={() => setRailOpen((v) => !v)}
+    >
+      <IconMenu />
+    </button>
+  );
 
   const mainTitle = (() => {
     if (mode === "compose") return "写笔记";
@@ -377,7 +461,13 @@ export default function AppShell({ initialArticleId = "" }) {
   );
 
   return (
-    <div className="shell">
+    <div className={shellClass}>
+      <button
+        type="button"
+        className="rail-backdrop"
+        aria-label="关闭菜单"
+        onClick={() => setRailOpen(false)}
+      />
       <aside className="rail">
         {NAV.map(({ id, label, Icon }) => (
           <button
@@ -396,18 +486,21 @@ export default function AppShell({ initialArticleId = "" }) {
 
       <section className="middle">
         <div className="middle-head">
-          <h1>{NAV.find((n) => n.id === nav)?.label || "醍醐"}</h1>
-          <p className="middle-sub">
-            {nav === "tihu"
-              ? "待办 · 笔记 · 阅读 · 留意"
-              : nav === "calendar"
-                ? "周历与月历"
-                : nav === "explore"
-                  ? "雅集与陋室"
-                  : nav === "act"
-                    ? "新笔记或找 AI"
-                    : "账号与客服"}
-          </p>
+          {menuBtn}
+          <div className="middle-head-text">
+            <h1>{NAV.find((n) => n.id === nav)?.label || "醍醐"}</h1>
+            <p className="middle-sub">
+              {nav === "tihu"
+                ? "待办 · 笔记 · 阅读 · 留意"
+                : nav === "calendar"
+                  ? "周历与月历"
+                  : nav === "explore"
+                    ? "雅集与陋室"
+                    : nav === "act"
+                      ? "新笔记或找 AI"
+                      : "账号与反馈"}
+            </p>
+          </div>
         </div>
 
         <div className="middle-body">
@@ -510,8 +603,8 @@ export default function AppShell({ initialArticleId = "" }) {
                 }}
               />
               <HubRow
-                title="客服和联系"
-                summary="反馈与联系方式"
+                title="联系与反馈"
+                summary="联系方式与意见反馈"
                 action="打开"
                 active={otherTab === "support" && mode === "feed"}
                 onClick={() => {
@@ -589,7 +682,22 @@ export default function AppShell({ initialArticleId = "" }) {
 
       <main className="main">
         <div className="main-head">
-          <h2>{mainTitle}</h2>
+          <div className="main-head-left">
+            {menuBtn}
+            {narrow &&
+            nav === "tihu" &&
+            hubView !== "home" &&
+            mode === "feed" ? (
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={backToTihuHome}
+              >
+                返回
+              </button>
+            ) : null}
+            <h2>{mainTitle}</h2>
+          </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {mode === "reader" || mode === "author" ? (
               <button
@@ -613,6 +721,111 @@ export default function AppShell({ initialArticleId = "" }) {
               </button>
             ) : null}
           </div>
+          {narrow && nav === "calendar" && mode === "feed" ? (
+            <div className="mobile-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${calendarView === "week" ? " active" : ""}`}
+                onClick={() => {
+                  if (!isLoggedIn) return needLogin();
+                  setCalendarView("week");
+                  refreshHub().catch(() => {});
+                }}
+              >
+                周历
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${calendarView === "month" ? " active" : ""}`}
+                onClick={() => {
+                  if (!isLoggedIn) return needLogin();
+                  setCalendarView("month");
+                  refreshHub().catch(() => {});
+                }}
+              >
+                月历
+              </button>
+            </div>
+          ) : null}
+          {narrow && nav === "explore" && (mode === "feed" || mode === "author") ? (
+            <div className="mobile-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${exploreTab === "market" && mode === "feed" ? " active" : ""}`}
+                onClick={() => {
+                  setExploreTab("market");
+                  setMode("feed");
+                }}
+              >
+                雅集
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${exploreTab === "mine" ? " active" : ""}`}
+                onClick={() => {
+                  if (!isLoggedIn) return needLogin();
+                  setExploreTab("mine");
+                  setMode("feed");
+                  refreshMine().catch(() => {});
+                }}
+              >
+                陋室
+              </button>
+            </div>
+          ) : null}
+          {narrow && nav === "act" ? (
+            <div className="mobile-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${mode === "compose" || mode === "feed" ? " active" : ""}`}
+                onClick={() => {
+                  if (!isLoggedIn) return needLogin();
+                  openCompose(null, { kind: null });
+                }}
+              >
+                新笔记
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${mode === "ai" ? " active" : ""}`}
+                onClick={openActAi}
+              >
+                找 AI
+              </button>
+            </div>
+          ) : null}
+          {narrow && nav === "other" ? (
+            <div className="mobile-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${otherTab === "settings" ? " active" : ""}`}
+                onClick={() => {
+                  setOtherTab("settings");
+                  setMode(isLoggedIn ? "settings" : "auth");
+                }}
+              >
+                账号和设置
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`mobile-tab${otherTab === "support" ? " active" : ""}`}
+                onClick={() => {
+                  setOtherTab("support");
+                  setMode("feed");
+                }}
+              >
+                联系与反馈
+              </button>
+            </div>
+          ) : null}
         </div>
         <div className={`main-body${mode === "ai" || mode === "compose" ? " main-body-flush" : ""}`}>
           {loading || authLoading ? (
@@ -729,7 +942,7 @@ export default function AppShell({ initialArticleId = "" }) {
               }}
             />
           ) : nav === "other" && otherTab === "support" && mode === "feed" ? (
-            <SupportPanel />
+            <SupportPanel toast={showToast} />
           ) : mode === "settings" ||
             (nav === "other" && otherTab === "settings" && isLoggedIn) ? (
             <SettingsPanel toast={showToast} />
@@ -952,7 +1165,11 @@ export default function AppShell({ initialArticleId = "" }) {
               )}
             </div>
           ) : nav === "tihu" && hubView === "home" ? (
-            <div className="empty">从左侧选择入口</div>
+            <div className="empty">
+              {narrow ? "请从上方入口进入" : "从左侧选择入口"}
+            </div>
+          ) : nav === "act" && mode === "feed" ? (
+            <div className="empty">选择「新笔记」开始写，或「找 AI」对话</div>
           ) : nav === "explore" ? (
             <ArticleFeed
               articles={exploreList}

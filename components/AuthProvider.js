@@ -8,7 +8,13 @@ import {
   useMemo,
   useState,
 } from "react";
-import { apiLogin, apiLogout, apiMe, apiHealth } from "../lib/client-api";
+import {
+  AUTH_EXPIRED_EVENT,
+  apiLogin,
+  apiLogout,
+  apiMe,
+  apiHealth,
+} from "../lib/client-api";
 
 const AuthContext = createContext(null);
 
@@ -38,6 +44,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(true);
   const [gatewayOk, setGatewayOk] = useState(null);
+  const [authExpiredTick, setAuthExpiredTick] = useState(0);
 
   const applySession = useCallback((payload) => {
     if (!payload?.user?.id) {
@@ -60,6 +67,21 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const clearLocalAuth = useCallback(() => {
+    setUser(null);
+    setProfile(null);
+    bridgeLegacySession(null, null);
+  }, []);
+
+  useEffect(() => {
+    const onExpired = () => {
+      clearLocalAuth();
+      setAuthExpiredTick((n) => n + 1);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, [clearLocalAuth]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -69,7 +91,6 @@ export function AuthProvider({ children }) {
         setGatewayOk(Boolean(health?.ok));
         setConfigured(health?.configured !== false && health != null);
         if (health && health.ok === false && health.supabase === false) {
-          // 网关在，但上游不通——仍算「已配置」，便于展示错误
           setConfigured(true);
         }
       } catch (_) {
@@ -83,14 +104,15 @@ export function AuthProvider({ children }) {
         const me = await apiMe();
         if (!alive) return;
         if (me?.configured === false) setConfigured(false);
-        // 有 user 且无 tokens 时保留 localStorage 里的 Bearer 兜底
+        // me 可能因服务端 refresh 带回新 tokens
         applySession(me);
       } catch (e) {
         if (!alive) return;
         setUser(null);
         setProfile(null);
-        // 仅鉴权失败时清 token；网络抖动不要抹掉
-        if (e?.status === 401) bridgeLegacySession(null, null);
+        if (e?.status === 401 || e?.authExpired) {
+          bridgeLegacySession(null, null);
+        }
       } finally {
         if (alive) setLoading(false);
       }
@@ -130,10 +152,12 @@ export function AuthProvider({ children }) {
       configured,
       gatewayOk,
       isLoggedIn: Boolean(user?.id),
+      authExpiredTick,
       signIn,
       signOut,
       refreshProfile,
       setProfile,
+      clearLocalAuth,
     }),
     [
       user,
@@ -141,9 +165,11 @@ export function AuthProvider({ children }) {
       loading,
       configured,
       gatewayOk,
+      authExpiredTick,
       signIn,
       signOut,
       refreshProfile,
+      clearLocalAuth,
     ],
   );
 

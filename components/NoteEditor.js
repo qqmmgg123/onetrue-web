@@ -57,7 +57,14 @@ export default function NoteEditor({
   const [city, setCity] = useState(note?.city || "");
   const [busy, setBusy] = useState(false);
   const quillRef = useRef(null);
+  const micRef = useRef(null);
+  const voiceInserting = useRef(false);
   const aiRefKey = note?.id || `draft:${defaultKind}`;
+
+  function stopMicOnKeyboard() {
+    if (voiceInserting.current) return;
+    micRef.current?.stopIfActive?.();
+  }
 
   const [scheduleLocal, setScheduleLocal] = useState(() =>
     toDatetimeLocalValue(
@@ -404,34 +411,44 @@ export default function NoteEditor({
         <label>标题</label>
         <input
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            stopMicOnKeyboard();
+          }}
           placeholder={kind === "article" ? "文章标题" : "可选"}
         />
       </div>
 
       <div className="field">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-          }}
-        >
-          <label style={{ margin: 0 }}>正文</label>
-          <VoiceMicButton
-            mode="dictation"
-            toast={toast}
-            onText={(t) => quillRef.current?.insertText?.(t)}
+        <label>正文</label>
+        <div className="quill-with-mic">
+          <QuillEditorField
+            ref={quillRef}
+            body={bodySeed}
+            format={bodyFormat}
+            placeholder="写点什么…"
+            onChange={(ops) => {
+              setBodyOps(ops);
+              stopMicOnKeyboard();
+            }}
           />
+          <div className="quill-mic-fab">
+            <VoiceMicButton
+              ref={micRef}
+              toast={toast}
+              onText={(t) => {
+                voiceInserting.current = true;
+                try {
+                  quillRef.current?.insertText?.(t);
+                } finally {
+                  queueMicrotask(() => {
+                    voiceInserting.current = false;
+                  });
+                }
+              }}
+            />
+          </div>
         </div>
-        <QuillEditorField
-          ref={quillRef}
-          body={bodySeed}
-          format={bodyFormat}
-          placeholder="写点什么…"
-          onChange={(ops) => setBodyOps(ops)}
-        />
       </div>
 
       {kind === "schedule" ? (

@@ -63,6 +63,20 @@ export function IconMore() {
   );
 }
 
+export function IconMenu() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden>
+      <path
+        d="M4 7h16M4 12h16M4 17h16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function IconSearch() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16">
