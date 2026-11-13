@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { uploadMyAvatar, upsertMyProfile } from "../lib/api";
 import { appDownloadHint, appDownloadUrl } from "../lib/site";
+import AvatarCropModal from "./AvatarCropModal";
 import { useAuth } from "./AuthProvider";
 import AuthPanel from "./AuthPanel";
 import UserAvatar from "./UserAvatar";
@@ -19,6 +20,7 @@ export default function SettingsPanel({ toast }) {
   } = useAuth();
   const [nick, setNick] = useState(profile?.nickname || "");
   const [busy, setBusy] = useState(false);
+  const [cropFile, setCropFile] = useState(null);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -30,6 +32,21 @@ export default function SettingsPanel({ toast }) {
   }
 
   const download = appDownloadUrl();
+
+  async function uploadCropped(file) {
+    setCropFile(null);
+    setBusy(true);
+    try {
+      const data = await uploadMyAvatar(file);
+      if (data?.profile) setProfile(data.profile);
+      await refreshProfile();
+      toast?.("头像已更新");
+    } catch (err) {
+      toast?.(err.message || "上传失败");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="panel">
@@ -59,21 +76,11 @@ export default function SettingsPanel({ toast }) {
             type="file"
             accept="image/*"
             style={{ display: "none" }}
-            onChange={async (e) => {
+            onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";
               if (!file) return;
-              setBusy(true);
-              try {
-                const data = await uploadMyAvatar(file);
-                if (data?.profile) setProfile(data.profile);
-                await refreshProfile();
-                toast?.("头像已更新");
-              } catch (err) {
-                toast?.(err.message || "上传失败");
-              } finally {
-                setBusy(false);
-              }
+              setCropFile(file);
             }}
           />
           <button
@@ -138,6 +145,14 @@ export default function SettingsPanel({ toast }) {
           <span className="sub">回到游客</span>
         </button>
       </div>
+
+      {cropFile ? (
+        <AvatarCropModal
+          file={cropFile}
+          onCancel={() => setCropFile(null)}
+          onConfirm={uploadCropped}
+        />
+      ) : null}
     </div>
   );
 }

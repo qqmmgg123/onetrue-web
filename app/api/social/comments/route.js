@@ -131,6 +131,13 @@ export async function POST(request) {
   }
 
   const me = await fetchProfileServer(user.id, token);
+  let replyToNickname = "";
+  if (replyToUserId) {
+    try {
+      const rp = await fetchProfileServer(replyToUserId, token);
+      replyToNickname = rp?.displayName || "";
+    } catch (_) {}
+  }
   return NextResponse.json({
     comment: {
       id: row?.id,
@@ -142,7 +149,7 @@ export async function POST(request) {
       createdAt: row?.created_at || new Date().toISOString(),
       authorNickname: me?.displayName || "",
       authorAvatarUrl: me?.avatarUrl || "",
-      replyToNickname: "",
+      replyToNickname,
     },
   });
 }

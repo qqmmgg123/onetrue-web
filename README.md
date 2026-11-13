@@ -17,9 +17,21 @@ App / 浏览器  →  EdgeOne(share-web)  →  Supabase
 
 ```bash
 cd share-web
-# 配置 .env.local（真实 SUPABASE_* + 可选 QINIU_*）
+# 配置 .env.local
 npm run dev
+# 可选：对比直连 vs 经网关
+# node --env-file=.env.local scripts/check-upstream.mjs
 ```
+
+国内本机常无法直连 `*.supabase.co`，此时 `/api/health`、`/api/articles` 会 **502**（属网络问题，不是页面坏了）。
+
+本机开发可把 `.env.local` 的 `SUPABASE_URL` 设为已部署网关：
+
+```
+SUPABASE_URL=http://otrue.top/api/sb
+```
+
+改完后需重启 `pnpm dev`。**EdgeOne 线上环境必须用真实 Supabase URL**，不能填自己的 `/api/sb`（会环）。
 
 ## App 打包
 

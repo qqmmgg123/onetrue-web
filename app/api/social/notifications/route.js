@@ -32,6 +32,7 @@ export async function GET(request) {
       id: r.id,
       kind: r.kind,
       noteId: r.note_id,
+      commentId: r.comment_id || null,
       body: r.body || "",
       createdAt: r.created_at,
       readAt: r.read_at,
