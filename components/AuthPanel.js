@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useAuth } from "./AuthProvider";
 
 export default function AuthPanel({ onDone }) {
-  const { signIn, configured, gatewayOk } = useAuth();
+  const { signIn, configured } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
@@ -26,14 +26,7 @@ export default function AuthPanel({ onDone }) {
   return (
     <div className="panel">
       <h2>登录</h2>
-      <p className="hint">
-        经本站 /api/auth 登录（不直连 Supabase）。
-        {gatewayOk === true
-          ? " 网关探活正常。"
-          : gatewayOk === false
-            ? " 网关探活失败，请检查服务端能否访问 Supabase。"
-            : ""}
-      </p>
+      <p className="hint">使用邮箱与密码登录。</p>
       <form
         onSubmit={async (e) => {
           e.preventDefault();

@@ -300,7 +300,11 @@ export default function AppShell({ initialArticleId = "" }) {
     setMode("feed");
     if (id === "tihu") setHubView("home");
     if (id === "calendar") {
-      if (!isLoggedIn) needLogin();
+      if (!isLoggedIn) {
+        needLogin();
+        return;
+      }
+      refreshHub().catch(() => {});
     }
     if (id === "explore") {
       setExploreTab("market");
@@ -316,6 +320,29 @@ export default function AppShell({ initialArticleId = "" }) {
     }
     refreshChats();
     setMode("ai");
+  }
+
+  /** 醍醐侧栏入口：菜单留在左侧，内容进主栏并刷新数据 */
+  async function openHub(view) {
+    if (view !== "reads" && !isLoggedIn) return needLogin();
+    setNav("tihu");
+    setHubView(view);
+    setMode("feed");
+    setSelected(null);
+    setHighlightCommentId("");
+    try {
+      if (view === "reads") {
+        refreshReads();
+        return;
+      }
+      if (view === "follow") {
+        await Promise.all([refreshFollow(), refreshHub()]);
+        return;
+      }
+      await refreshHub();
+    } catch (e) {
+      showToast(e.message || "加载失败");
+    }
   }
 
   const mainTitle = (() => {
@@ -396,6 +423,7 @@ export default function AppShell({ initialArticleId = "" }) {
                   setCalendarView("week");
                   setMode("feed");
                   setNav("calendar");
+                  refreshHub().catch(() => {});
                 }}
               />
               <HubRow
@@ -408,6 +436,7 @@ export default function AppShell({ initialArticleId = "" }) {
                   setCalendarView("month");
                   setMode("feed");
                   setNav("calendar");
+                  refreshHub().catch(() => {});
                 }}
               />
             </>
@@ -494,7 +523,7 @@ export default function AppShell({ initialArticleId = "" }) {
             </>
           ) : null}
 
-          {nav === "tihu" && hubView === "home" ? (
+          {nav === "tihu" ? (
             <>
               <HubRow
                 title="待办事项"
@@ -503,11 +532,9 @@ export default function AppShell({ initialArticleId = "" }) {
                     ? displayTitle(todoPreview.title, todoPreview.body)
                     : "暂无备忘或日程。"
                 }
-                action="查看全部"
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setHubView("todos");
-                }}
+                action="打开"
+                active={hubView === "todos" && mode === "feed"}
+                onClick={() => openHub("todos")}
               />
               <HubRow
                 title="近期笔记"
@@ -516,203 +543,46 @@ export default function AppShell({ initialArticleId = "" }) {
                     ? snippet(latestNote.title, latestNote.body, 40)
                     : "还没有笔记，去「作为」写一篇吧。"
                 }
-                action="查看全部"
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setHubView("notes");
-                }}
+                action="打开"
+                active={hubView === "notes" && mode === "feed"}
+                onClick={() => openHub("notes")}
               />
               <HubRow
                 title="近期阅读"
                 summary={
                   latestRead
                     ? `${displayTitle(latestRead.title, latestRead.body)} · ${formatWhen(latestRead.lastReadAt)}`
-                    : "还没有阅读记录。去雅集点开文章后会出现在这里。"
+                    : "还没有阅读记录。"
                 }
-                action="查看全部"
-                onClick={() => {
-                  refreshReads();
-                  setHubView("reads");
-                  setMode("feed");
-                }}
+                action="打开"
+                active={hubView === "reads" && mode === "feed"}
+                onClick={() => openHub("reads")}
               />
               <HubRow
                 title="我的收藏"
                 summary="收藏过的文章"
-                action="进入"
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setHubView("fav");
-                  setMode("feed");
-                }}
+                action="打开"
+                active={hubView === "fav" && (mode === "feed" || mode === "reader")}
+                onClick={() => openHub("fav")}
               />
               <HubRow
                 title="留意的人"
-                summary="查看留意用户最新上架的文章"
-                action="进入"
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setHubView("follow");
-                  refreshFollow().catch(() => {});
-                  setMode("feed");
-                }}
+                summary="留意用户最新上架的文章"
+                action="打开"
+                active={
+                  hubView === "follow" && (mode === "feed" || mode === "reader")
+                }
+                onClick={() => openHub("follow")}
               />
               <HubRow
                 title="评点和回书"
                 summary="别人评点、回书或推荐你的文章"
-                action="进入"
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setHubView("inbox");
-                }}
+                action="打开"
+                active={hubView === "inbox" && mode === "feed"}
+                onClick={() => openHub("inbox")}
               />
             </>
           ) : null}
-
-          {nav === "tihu" && hubView === "todos"
-            ? (todos.length ? todos : []).map((n) => (
-                <button
-                  key={n.id}
-                  type="button"
-                  className="list-item"
-                  onClick={() => openCompose(n)}
-                >
-                  <UserAvatar profile={{ displayName: n.kind }} />
-                  <div>
-                    <div className="title">
-                      {displayTitle(n.title, n.body)}
-                    </div>
-                    <div className="meta">
-                      {n.kind === "schedule" ? "日程" : "备忘"}
-                    </div>
-                  </div>
-                  <div className="time">
-                    {formatWhen(n.scheduleAt || n.remindAt || n.updatedAt)}
-                  </div>
-                </button>
-              ))
-            : null}
-
-          {nav === "tihu" && hubView === "notes"
-            ? notes.map((n) => (
-                <button
-                  key={n.id}
-                  type="button"
-                  className="list-item"
-                  onClick={() => openCompose(n)}
-                >
-                  <UserAvatar profile={{ displayName: n.kind || "笔" }} />
-                  <div>
-                    <div className="title">
-                      {displayTitle(n.title, n.body)}
-                    </div>
-                    <div className="meta">{snippet(n.title, n.body, 40)}</div>
-                  </div>
-                  <div className="time">{formatWhen(n.updatedAt)}</div>
-                </button>
-              ))
-            : null}
-
-          {nav === "tihu" && hubView === "reads"
-            ? recentReads.length === 0
-              ? (
-                  <div className="empty">
-                    还没有阅读记录。去「求索 → 雅集」点开文章后会出现在这里。
-                  </div>
-                )
-              : recentReads.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    className="list-item"
-                    onClick={() => {
-                      const a = readsToArticle(r);
-                      if (a) openArticle(a);
-                    }}
-                  >
-                    <UserAvatar
-                      profile={profiles[r.ownerId] || { displayName: "读" }}
-                    />
-                    <div>
-                      <div className="title">
-                        {displayTitle(r.title, r.body)}
-                      </div>
-                      <div className="meta">{snippet(r.title, r.body, 40)}</div>
-                    </div>
-                    <div className="time">{formatWhen(r.lastReadAt)}</div>
-                  </button>
-                ))
-            : null}
-
-          {nav === "tihu" && hubView === "fav"
-            ? filterList(favorites).map((a) => (
-                <ArticleListItem
-                  key={a.id}
-                  a={a}
-                  profile={profiles[a.ownerId]}
-                  active={selected?.id === a.id && mode === "reader"}
-                  onClick={() => openArticle(a)}
-                />
-              ))
-            : null}
-
-          {nav === "tihu" && hubView === "follow"
-            ? filterList(followArticles).map((a) => (
-                <ArticleListItem
-                  key={a.id}
-                  a={a}
-                  profile={profiles[a.ownerId]}
-                  active={selected?.id === a.id && mode === "reader"}
-                  onClick={() => openArticle(a)}
-                />
-              ))
-            : null}
-
-          {nav === "tihu" && hubView === "inbox"
-            ? (notices.length === 0 ? (
-                <div className="empty">暂无评点或回书</div>
-              ) : (
-                notices.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className="hub-row"
-                    onClick={async () => {
-                      if (!n.noteId) return;
-                      try {
-                        const list = await fetchListedArticles();
-                        const a = list.find((x) => x.id === n.noteId);
-                        if (a) {
-                          openArticle(a, {
-                            highlightCommentId: n.commentId || "",
-                          });
-                        } else showToast("文章可能已下架");
-                      } catch (e) {
-                        showToast(e.message || "打开失败");
-                      }
-                    }}
-                  >
-                    <div className="row-top">
-                      <span className="label">
-                        {n.actor?.displayName || "有人"}
-                      </span>
-                      <span className="action">{formatWhen(n.createdAt)}</span>
-                    </div>
-                    <div className="summary">
-                      {n.kind === "follow"
-                        ? "留意了你"
-                        : n.kind === "recommend"
-                          ? "推荐了你的文章"
-                          : n.kind === "reply"
-                            ? "回书了你"
-                            : n.kind === "comment"
-                              ? "评点了你的文章"
-                              : n.body || n.kind}
-                    </div>
-                  </button>
-                ))
-              ))
-            : null}
 
         </div>
       </section>
@@ -721,15 +591,6 @@ export default function AppShell({ initialArticleId = "" }) {
         <div className="main-head">
           <h2>{mainTitle}</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {nav === "tihu" && hubView !== "home" ? (
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => setHubView("home")}
-              >
-                返回醍醐
-              </button>
-            ) : null}
             {mode === "reader" || mode === "author" ? (
               <button
                 type="button"
@@ -945,6 +806,89 @@ export default function AppShell({ initialArticleId = "" }) {
                 });
               }}
             />
+          ) : nav === "tihu" && hubView === "todos" ? (
+            <div className="hub-main-list">
+              {todos.length === 0 ? (
+                <div className="empty">暂无备忘或日程</div>
+              ) : (
+                todos.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="list-item"
+                    onClick={() => openCompose(n)}
+                  >
+                    <UserAvatar profile={{ displayName: n.kind }} />
+                    <div>
+                      <div className="title">
+                        {displayTitle(n.title, n.body)}
+                      </div>
+                      <div className="meta">
+                        {n.kind === "schedule" ? "日程" : "备忘"}
+                      </div>
+                    </div>
+                    <div className="time">
+                      {formatWhen(n.scheduleAt || n.remindAt || n.updatedAt)}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : nav === "tihu" && hubView === "notes" ? (
+            <div className="hub-main-list">
+              {notes.length === 0 ? (
+                <div className="empty">还没有笔记，去「作为」写一篇吧</div>
+              ) : (
+                notes.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="list-item"
+                    onClick={() => openCompose(n)}
+                  >
+                    <UserAvatar profile={{ displayName: n.kind || "笔" }} />
+                    <div>
+                      <div className="title">
+                        {displayTitle(n.title, n.body)}
+                      </div>
+                      <div className="meta">{snippet(n.title, n.body, 40)}</div>
+                    </div>
+                    <div className="time">{formatWhen(n.updatedAt)}</div>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : nav === "tihu" && hubView === "reads" ? (
+            <div className="hub-main-list">
+              {recentReads.length === 0 ? (
+                <div className="empty">
+                  还没有阅读记录。去「求索 → 雅集」点开文章后会出现在这里。
+                </div>
+              ) : (
+                recentReads.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="list-item"
+                    onClick={() => {
+                      const a = readsToArticle(r);
+                      if (a) openArticle(a);
+                    }}
+                  >
+                    <UserAvatar
+                      profile={profiles[r.ownerId] || { displayName: "读" }}
+                    />
+                    <div>
+                      <div className="title">
+                        {displayTitle(r.title, r.body)}
+                      </div>
+                      <div className="meta">{snippet(r.title, r.body, 40)}</div>
+                    </div>
+                    <div className="time">{formatWhen(r.lastReadAt)}</div>
+                  </button>
+                ))
+              )}
+            </div>
           ) : nav === "tihu" && hubView === "fav" ? (
             <ArticleFeed
               articles={filterList(favorites)}
@@ -961,6 +905,54 @@ export default function AppShell({ initialArticleId = "" }) {
               onSelect={openArticle}
               emptyText="留意作者后，这里会出现动态"
             />
+          ) : nav === "tihu" && hubView === "inbox" ? (
+            <div className="hub-main-list">
+              {notices.length === 0 ? (
+                <div className="empty">暂无评点或回书</div>
+              ) : (
+                notices.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="hub-row"
+                    onClick={async () => {
+                      if (!n.noteId) return;
+                      try {
+                        const list = await fetchListedArticles();
+                        const a = list.find((x) => x.id === n.noteId);
+                        if (a) {
+                          openArticle(a, {
+                            highlightCommentId: n.commentId || "",
+                          });
+                        } else showToast("文章可能已下架");
+                      } catch (e) {
+                        showToast(e.message || "打开失败");
+                      }
+                    }}
+                  >
+                    <div className="row-top">
+                      <span className="label">
+                        {n.actor?.displayName || "有人"}
+                      </span>
+                      <span className="action">{formatWhen(n.createdAt)}</span>
+                    </div>
+                    <div className="summary">
+                      {n.kind === "follow"
+                        ? "留意了你"
+                        : n.kind === "recommend"
+                          ? "推荐了你的文章"
+                          : n.kind === "reply"
+                            ? "回书了你"
+                            : n.kind === "comment"
+                              ? "评点了你的文章"
+                              : n.body || n.kind}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : nav === "tihu" && hubView === "home" ? (
+            <div className="empty">从左侧选择入口</div>
           ) : nav === "explore" ? (
             <ArticleFeed
               articles={exploreList}

@@ -1133,6 +1133,14 @@ button {
   overflow: hidden;
 }
 
+.hub-main-list {
+  max-width: 720px;
+}
+
+.hub-main-list .list-item {
+  width: 100%;
+}
+
 .note-editor-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);

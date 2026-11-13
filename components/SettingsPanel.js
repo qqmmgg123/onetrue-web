@@ -16,7 +16,6 @@ export default function SettingsPanel({ toast }) {
     signOut,
     refreshProfile,
     setProfile,
-    gatewayOk,
   } = useAuth();
   const [nick, setNick] = useState(profile?.nickname || "");
   const [busy, setBusy] = useState(false);
@@ -54,11 +53,6 @@ export default function SettingsPanel({ toast }) {
       <p className="hint">
         {profile?.displayName || "用户"}
         {user?.email ? ` · ${user.email}` : ""}
-        {gatewayOk === true
-          ? " · 网关正常"
-          : gatewayOk === false
-            ? " · 网关异常"
-            : ""}
       </p>
 
       <div
@@ -130,10 +124,6 @@ export default function SettingsPanel({ toast }) {
             <span className="sub">下载</span>
           </a>
         ) : null}
-        <div className="row">
-          <span>API 网关</span>
-          <span className="sub">EdgeOne → Supabase</span>
-        </div>
         <button
           type="button"
           onClick={async () => {
