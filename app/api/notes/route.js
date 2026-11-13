@@ -113,7 +113,6 @@ export async function POST(request) {
     listing_status: kind === "article" ? listingStatus : "draft",
     city,
     updated_at: now,
-    created_at: now,
     listed_at:
       kind === "article" && listingStatus === "listed" ? now : null,
     schedule_at: scheduleAt,
