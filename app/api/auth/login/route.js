@@ -72,7 +72,7 @@ export async function POST(request) {
           Math.floor(Date.now() / 1000) + (session.expires_in || 3600),
       },
     });
-    setSessionCookies(res, session);
+    setSessionCookies(res, session, request);
     return res;
   } catch (e) {
     return NextResponse.json(

@@ -623,6 +623,41 @@ button {
   resize: vertical;
 }
 
+.password-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.password-field:focus-within {
+  border-bottom-color: var(--ink);
+}
+
+.password-field input {
+  flex: 1;
+  border: none !important;
+  border-bottom: none !important;
+  padding: 8px 0;
+  min-width: 0;
+}
+
+.password-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+  border-radius: 4px;
+}
+
+.password-toggle:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
 .error {
   color: var(--danger);
   font-size: 13px;

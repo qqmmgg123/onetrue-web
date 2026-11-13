@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { useAuth } from "./AuthProvider";
+import { IconEye } from "./icons";
 
 export default function AuthPanel({ onDone }) {
   const { signIn, configured } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -54,13 +56,24 @@ export default function AuthPanel({ onDone }) {
         </div>
         <div className="field">
           <label>密码</label>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <div className="password-field">
+            <button
+              type="button"
+              className="password-toggle"
+              aria-label={showPassword ? "隐藏密码" : "显示密码"}
+              title={showPassword ? "隐藏密码" : "显示密码"}
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              <IconEye off={showPassword} />
+            </button>
+            <input
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
         </div>
         <div className="field">
           <label>昵称（可选，用于补全档案）</label>

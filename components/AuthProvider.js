@@ -83,9 +83,14 @@ export function AuthProvider({ children }) {
         const me = await apiMe();
         if (!alive) return;
         if (me?.configured === false) setConfigured(false);
+        // 有 user 且无 tokens 时保留 localStorage 里的 Bearer 兜底
         applySession(me);
-      } catch (_) {
-        if (alive) applySession(null);
+      } catch (e) {
+        if (!alive) return;
+        setUser(null);
+        setProfile(null);
+        // 仅鉴权失败时清 token；网络抖动不要抹掉
+        if (e?.status === 401) bridgeLegacySession(null, null);
       } finally {
         if (alive) setLoading(false);
       }
