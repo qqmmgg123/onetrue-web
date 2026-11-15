@@ -14,60 +14,15 @@ import {
   makePending,
   parseToolCall,
 } from "../../../../lib/server/ai-tools";
+import {
+  callChatWithFailover,
+  resolveLlmEndpoints,
+} from "../../../../lib/server/llm-config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function llmConfig() {
-  const apiKey = (process.env.LLM_API_KEY || "").trim();
-  const base = (process.env.LLM_BASE_URL || "https://api.deepseek.com/v1")
-    .trim()
-    .replace(/\/+$/, "");
-  const model = (process.env.LLM_MODEL || "deepseek-chat").trim();
-  return { apiKey, base, model };
-}
-
-async function callUpstream({ apiKey, base, model, messages, tools }) {
-  const chatBody = {
-    model,
-    temperature: 0.3,
-    messages,
-  };
-  if (tools?.length) {
-    chatBody.tools = tools;
-    chatBody.tool_choice = "auto";
-  }
-  const upstream = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(chatBody),
-  });
-  const text = await upstream.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (_) {
-    data = { raw: text };
-  }
-  if (!upstream.ok) {
-    const err = new Error(
-      data.error?.message ||
-        data.error ||
-        data.message ||
-        text ||
-        "AI 失败",
-    );
-    err.status = upstream.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
-}
-
-/** 优先本机直连 LLM（含 tools）；失败再试无 tools 的 Edge Function 闲聊 */
+/** 优先本站直连（智谱→百度→DeepSeek）；失败再试 Supabase llm-chat */
 export async function POST(request) {
   if (!hasServerSupabase()) {
     return NextResponse.json({ error: "服务端未配置 Supabase" }, { status: 503 });
@@ -104,24 +59,23 @@ export async function POST(request) {
     inventory = "";
   }
 
-  const { apiKey, base, model } = llmConfig();
-  if (apiKey) {
+  const llmMessages = [
+    {
+      role: "system",
+      content: inventory
+        ? `${SYSTEM_PROMPT}\n\n当前笔记本摘要：\n${inventory}`
+        : SYSTEM_PROMPT,
+    },
+    ...messages.slice(-24),
+  ];
+
+  if (resolveLlmEndpoints().length) {
     try {
-      const llmMessages = [
-        {
-          role: "system",
-          content: inventory
-            ? `${SYSTEM_PROMPT}\n\n当前笔记本摘要：\n${inventory}`
-            : SYSTEM_PROMPT,
-        },
-        ...messages.slice(-24),
-      ];
-      const data = await callUpstream({
-        apiKey,
-        base,
-        model: body.model || model,
+      const { data } = await callChatWithFailover({
         messages: llmMessages,
         tools: TOOL_SCHEMAS,
+        modelOverride: body.model,
+        temperature: 0.3,
       });
       const msg = data?.choices?.[0]?.message || {};
       const call = parseToolCall(msg);
@@ -156,37 +110,36 @@ export async function POST(request) {
       return NextResponse.json({ reply, content: reply, pending });
     } catch (e) {
       console.error("direct llm+tools failed", e);
-      // fall through
+      // fall through to edge / no-tools
     }
-  }
 
-  // 回退：无 tools 的 Edge Function / 或无 key 时的闲聊
-  try {
-    if (apiKey) {
-      const data = await callUpstream({
-        apiKey,
-        base,
-        model: body.model || model,
+    try {
+      const { data } = await callChatWithFailover({
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           ...messages.slice(-24),
         ],
         tools: undefined,
-      }).catch(() => null);
-      if (data) {
-        const content =
-          data?.choices?.[0]?.message?.content ||
-          data?.reply ||
-          data?.content ||
-          "";
-        return NextResponse.json({
-          reply: content,
-          content,
-          pending: null,
-        });
-      }
+        modelOverride: body.model,
+        temperature: 0.3,
+      });
+      const content =
+        data?.choices?.[0]?.message?.content ||
+        data?.reply ||
+        data?.content ||
+        "";
+      return NextResponse.json({
+        reply: content,
+        content,
+        pending: null,
+      });
+    } catch (e) {
+      console.error("direct llm no-tools failed", e);
     }
+  }
 
+  // 回退：Supabase Edge llm-chat（需已 deploy 且 Secrets 配 LLM_API_KEY）
+  try {
     const upstream = await fetch(`${supabaseUrl()}/functions/v1/llm-chat`, {
       method: "POST",
       headers: {
@@ -195,7 +148,7 @@ export async function POST(request) {
         apikey: supabaseAnonKey(),
       },
       body: JSON.stringify({
-        model: body.model || model,
+        model: body.model,
         temperature: 0.3,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
@@ -214,7 +167,7 @@ export async function POST(request) {
       const msg = data.error || data.message || text || "AI 失败";
       const hint =
         String(msg).includes("not found") || String(msg).includes("Function")
-          ? "（请在 EdgeOne 配置 LLM_API_KEY，或部署 Supabase llm-chat）"
+          ? "（请在 EdgeOne 配置 ZHIPU_API_KEY，或部署 Supabase llm-chat）"
           : "";
       return NextResponse.json(
         {
@@ -239,7 +192,7 @@ export async function POST(request) {
       {
         error:
           e.message ||
-          "AI 上游失败。请在 share-web 环境变量配置 LLM_API_KEY / LLM_BASE_URL",
+          "AI 上游失败。请在 EdgeOne 配置 ZHIPU_API_KEY（推荐）或 LLM_API_KEY",
       },
       { status: 502 },
     );

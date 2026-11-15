@@ -7,18 +7,10 @@ import {
   NOTE_AI_TOOLS,
   parseNoteToolCalls,
 } from "../../../../lib/server/note-ai-tools";
+import { callChatWithFailover } from "../../../../lib/server/llm-config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function llmConfig() {
-  const apiKey = (process.env.LLM_API_KEY || "").trim();
-  const base = (process.env.LLM_BASE_URL || "https://api.deepseek.com/v1")
-    .trim()
-    .replace(/\/+$/, "");
-  const model = (process.env.LLM_MODEL || "deepseek-chat").trim();
-  return { apiKey, base, model };
-}
 
 /**
  * 笔记内 AI：带草稿上下文 + 立刻生效的 draft tools。
@@ -35,14 +27,6 @@ export async function POST(request) {
   const user = await authGetUser(token);
   if (!user?.id) {
     return NextResponse.json({ error: "登录失效" }, { status: 401 });
-  }
-
-  const { apiKey, base, model } = llmConfig();
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "未配置 LLM_API_KEY，无法使用笔记内 AI" },
-      { status: 503 },
-    );
   }
 
   let body;
@@ -77,45 +61,17 @@ export async function POST(request) {
     : [];
 
   try {
-    const upstream = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: body.model || model,
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: NOTE_AI_SYSTEM },
-          { role: "system", content: draftCtx },
-          ...history,
-          { role: "user", content: userText },
-        ],
-        tools: NOTE_AI_TOOLS,
-        tool_choice: "auto",
-      }),
+    const { data } = await callChatWithFailover({
+      messages: [
+        { role: "system", content: NOTE_AI_SYSTEM },
+        { role: "system", content: draftCtx },
+        ...history,
+        { role: "user", content: userText },
+      ],
+      tools: NOTE_AI_TOOLS,
+      modelOverride: body.model,
+      temperature: 0.2,
     });
-    const text = await upstream.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (_) {
-      data = { raw: text };
-    }
-    if (!upstream.ok) {
-      return NextResponse.json(
-        {
-          error:
-            data.error?.message ||
-            data.error ||
-            data.message ||
-            text ||
-            "AI 失败",
-        },
-        { status: upstream.status },
-      );
-    }
     const msg = data?.choices?.[0]?.message || {};
     const content = String(msg.content || "").trim();
     const toolCalls = parseNoteToolCalls(msg);
@@ -126,8 +82,12 @@ export async function POST(request) {
     });
   } catch (e) {
     return NextResponse.json(
-      { error: e.message || "笔记 AI 失败" },
-      { status: 502 },
+      {
+        error:
+          e.message ||
+          "笔记 AI 失败。请在 EdgeOne 配置 ZHIPU_API_KEY（推荐）",
+      },
+      { status: e.status || 502 },
     );
   }
 }
