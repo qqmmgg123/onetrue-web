@@ -14,6 +14,9 @@ import {
   apiLogout,
   apiMe,
   apiHealth,
+  apiSignup,
+  apiVerifyOtp,
+  apiResendOtp,
 } from "../lib/client-api";
 
 const AuthContext = createContext(null);
@@ -131,6 +134,37 @@ export function AuthProvider({ children }) {
     [applySession],
   );
 
+  /** 注册：可能返回 { needsOtp: true }，需再 verifyOtp */
+  const signUp = useCallback(
+    async ({ email, password, nickname }) => {
+      const data = await apiSignup({ email, password, nickname });
+      if (data?.tokens?.access_token) {
+        applySession(data);
+      }
+      return data;
+    },
+    [applySession],
+  );
+
+  const verifyOtp = useCallback(
+    async ({ email, phone, token, type, nickname }) => {
+      const data = await apiVerifyOtp({
+        email,
+        phone,
+        token,
+        type,
+        nickname,
+      });
+      applySession(data);
+      return data.user;
+    },
+    [applySession],
+  );
+
+  const resendOtp = useCallback(async ({ email, phone, type }) => {
+    return apiResendOtp({ email, phone, type });
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       await apiLogout();
@@ -154,6 +188,9 @@ export function AuthProvider({ children }) {
       isLoggedIn: Boolean(user?.id),
       authExpiredTick,
       signIn,
+      signUp,
+      verifyOtp,
+      resendOtp,
       signOut,
       refreshProfile,
       setProfile,
@@ -167,6 +204,9 @@ export function AuthProvider({ children }) {
       gatewayOk,
       authExpiredTick,
       signIn,
+      signUp,
+      verifyOtp,
+      resendOtp,
       signOut,
       refreshProfile,
       clearLocalAuth,

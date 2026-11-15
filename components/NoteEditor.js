@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { createNote, updateNote } from "../lib/api";
 import { bodyToStorage, isBodyEmpty, kStoredQuill } from "../lib/quill-body";
 import {
@@ -30,16 +36,18 @@ function initialOffset(note, kind) {
   return 0;
 }
 
-export default function NoteEditor({
-  note = null,
-  onCreated,
-  onSaved,
-  onCancel,
-  toast,
-  initialScheduleAt = null,
-  initialRemindAt = null,
-  initialKind = null,
-}) {
+const NoteEditor = forwardRef(function NoteEditor(
+  {
+    note = null,
+    onCreated,
+    onSaved,
+    toast,
+    initialScheduleAt = null,
+    initialRemindAt = null,
+    initialKind = null,
+  },
+  ref,
+) {
   const editing = Boolean(note?.id);
   const defaultKind =
     note?.kind ||
@@ -106,32 +114,54 @@ export default function NoteEditor({
 
   const lockedFromCal =
     !editing && Boolean(initialScheduleAt || initialRemindAt);
-  const heading = editing
-    ? kind === "schedule"
-      ? "编辑日程"
-      : kind === "memo"
-        ? "编辑备忘"
-        : kind === "article"
-          ? "编辑文章"
-          : "编辑笔记"
-    : defaultKind === "schedule"
-      ? "新建日程"
-      : defaultKind === "memo"
-        ? "新建备忘"
-        : "写笔记";
+  const baselineRef = useRef("");
+  const baselineReady = useRef(false);
 
-  const whenHint = useMemo(() => {
-    if (kind === "schedule" && scheduleLocal) {
-      const d = fromDatetimeLocalValue(scheduleLocal);
-      return d ? `日程时间：${d.toLocaleString()}` : "";
-    }
-    if (kind === "memo" && !memoNoRemind && memoRemindLocal) {
-      const d = fromDatetimeLocalValue(memoRemindLocal);
-      return d ? `备忘提醒：${d.toLocaleString()}` : "";
-    }
-    if (kind === "memo" && memoNoRemind) return "备忘 · 不提醒";
-    return "";
-  }, [kind, scheduleLocal, memoRemindLocal, memoNoRemind]);
+  function plainNow() {
+    return (
+      quillRef.current?.getPlain?.() ||
+      (bodyOps
+        ? bodyOps
+            .map((o) => (typeof o.insert === "string" ? o.insert : ""))
+            .join("")
+            .replace(/\n+$/, "")
+        : "")
+    );
+  }
+
+  function snapshot() {
+    return JSON.stringify({
+      title: String(title || "").trim(),
+      plain: String(plainNow() || "").trim(),
+      kind,
+      listIt,
+      city: String(city || "").trim(),
+      scheduleLocal,
+      memoRemindLocal,
+      memoNoRemind,
+      remindOffsetMin,
+      recurFreq,
+      recurByday,
+      recurEndMode,
+      recurUntilLocal,
+      recurCount,
+    });
+  }
+
+  function isDirty() {
+    if (!baselineReady.current) return false;
+    return snapshot() !== baselineRef.current;
+  }
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      baselineRef.current = snapshot();
+      baselineReady.current = true;
+    }, 400);
+    return () => window.clearTimeout(t);
+    // 仅挂载时采基线
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function optionsSnapshot() {
     return {
@@ -265,7 +295,7 @@ export default function NoteEditor({
     return tips;
   }
 
-  async function handleSave() {
+  async function handleSave({ silentEmpty = false, skipNavigate = false } = {}) {
     const ops = bodyOps ?? quillRef.current?.getOps?.() ?? null;
     const storedBody =
       ops != null
@@ -280,8 +310,9 @@ export default function NoteEditor({
               ])
           : bodyToStorage([{ insert: "\n" }]);
     if (!String(title).trim() && isBodyEmpty(ops ?? storedBody, kStoredQuill)) {
+      if (silentEmpty) return null;
       toast?.("请填写标题或正文");
-      return;
+      throw new Error("请填写标题或正文");
     }
 
     setBusy(true);
@@ -357,24 +388,32 @@ export default function NoteEditor({
             ? "已更新"
             : "已保存",
       );
-      if (editing) onSaved?.(saved);
-      else onCreated?.(saved);
+      baselineRef.current = snapshot();
+      baselineReady.current = true;
+      if (!skipNavigate) {
+        if (editing) onSaved?.(saved);
+        else onCreated?.(saved);
+      }
+      return saved;
     } catch (e) {
       toast?.(e.message || "保存失败");
+      throw e;
     } finally {
       setBusy(false);
     }
   }
 
+  useImperativeHandle(ref, () => ({
+    isDirty,
+    /** 离开页面前保存：不触发 onCreated/onSaved 导航，由外壳接手 */
+    async save() {
+      return handleSave({ skipNavigate: true });
+    },
+  }));
+
   return (
     <div className="note-editor-split">
     <div className="panel note-editor-main">
-      <h2>{heading}</h2>
-      <p className="hint">
-        正文与 App 共用 Quill Delta；上架文章会出现在求索雅集。
-        {whenHint ? ` ${whenHint}` : ""}
-      </p>
-
       {!lockedFromCal ? (
         <div className="field">
           <label>类型</label>
@@ -634,15 +673,10 @@ export default function NoteEditor({
           className="btn"
           type="button"
           disabled={busy}
-          onClick={handleSave}
+          onClick={() => handleSave().catch(() => {})}
         >
           {busy ? "保存中…" : editing ? "更新" : "保存"}
         </button>
-        {onCancel ? (
-          <button className="btn ghost" type="button" onClick={onCancel}>
-            取消
-          </button>
-        ) : null}
       </div>
     </div>
 
@@ -658,4 +692,6 @@ export default function NoteEditor({
       </aside>
     </div>
   );
-}
+});
+
+export default NoteEditor;

@@ -1192,6 +1192,64 @@ button {
   word-break: break-word;
 }
 
+.leave-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.leave-dialog {
+  width: min(400px, 100%);
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 20px 20px 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+.leave-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.leave-dialog p {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.leave-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+
+.auth-tab {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.auth-tab.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--ink);
+}
+
 @media (max-width: 520px) {
   .feed-grid {
     grid-template-columns: 1fr;

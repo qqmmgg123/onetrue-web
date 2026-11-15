@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchListedArticles,
   fetchFollowingArticles,
   fetchMyFavorites,
   fetchMyNotes,
+  fetchMyReads,
   fetchNotifications,
   fetchProfiles,
 } from "../lib/api";
@@ -15,7 +16,11 @@ import {
   listChatSessions,
 } from "../lib/chat-store";
 import { displayTitle, excerpt, formatWhen, snippet } from "../lib/format";
-import { listArticleReads, readsToArticle } from "../lib/recent-reads";
+import {
+  listArticleReads,
+  readsToArticle,
+  replaceUserArticleReadsCache,
+} from "../lib/recent-reads";
 import AiChat from "./AiChat";
 import ArticleFeed from "./ArticleFeed";
 import ArticleReader from "./ArticleReader";
@@ -80,6 +85,9 @@ export default function AppShell({ initialArticleId = "" }) {
   const [highlightCommentId, setHighlightCommentId] = useState("");
   const [narrow, setNarrow] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
+  const [leaveDlg, setLeaveDlg] = useState(null); // { run: () => void }
+  const [leaveBusy, setLeaveBusy] = useState(false);
+  const composeGuardRef = useRef(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -94,6 +102,18 @@ export default function AppShell({ initialArticleId = "" }) {
     if (!narrow) setRailOpen(false);
   }, [narrow]);
 
+  useEffect(() => {
+    if (mode !== "compose") return undefined;
+    const onBeforeUnload = (e) => {
+      if (composeGuardRef.current?.isDirty?.()) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [mode]);
+
   const showToast = useCallback((msg) => {
     setToast(msg);
     window.clearTimeout(showToast._t);
@@ -104,8 +124,20 @@ export default function AppShell({ initialArticleId = "" }) {
     setChatList(listChatSessions());
   }, []);
 
-  const refreshReads = useCallback(() => {
-    const list = listArticleReads();
+  const refreshReads = useCallback(async () => {
+    const uid = isLoggedIn ? user?.id || "" : "";
+    // 仅登录用户有近期阅读；游客为空
+    if (!uid) {
+      setRecentReads([]);
+      return;
+    }
+    try {
+      const cloud = await fetchMyReads();
+      replaceUserArticleReadsCache(uid, cloud);
+    } catch (_) {
+      /* 离线时用本机用户缓存 */
+    }
+    const list = listArticleReads({ userId: uid });
     setRecentReads(list);
     const ids = list.map((r) => r.ownerId).filter(Boolean);
     if (ids.length) {
@@ -113,7 +145,7 @@ export default function AppShell({ initialArticleId = "" }) {
         .then((map) => setProfiles((prev) => ({ ...prev, ...map })))
         .catch(() => {});
     }
-  }, []);
+  }, [isLoggedIn, user?.id]);
 
   const loadProfilesFor = useCallback(async (list) => {
     const ids = list.map((a) => a.ownerId).filter(Boolean);
@@ -243,16 +275,34 @@ export default function AppShell({ initialArticleId = "" }) {
     setComposeNote(null);
   }
 
-  function openCompose(note = null, extras = {}) {
-    if (!isLoggedIn) {
-      needLogin();
+  /** 离开写笔记/编辑页：有改动则提示保存 / 不保存 / 取消 */
+  function leaveComposeThen(run) {
+    if (mode !== "compose") {
+      run();
       return;
     }
-    setComposeNote(note || null);
-    setComposeScheduleAt(extras.scheduleAt ?? null);
-    setComposeRemindAt(extras.remindAt ?? null);
-    setComposeKind(extras.kind ?? note?.kind ?? null);
-    setMode("compose");
+    if (!composeGuardRef.current?.isDirty?.()) {
+      clearCompose();
+      run();
+      return;
+    }
+    setLeaveDlg({ run });
+  }
+
+  function openCompose(note = null, extras = {}) {
+    const enter = () => {
+      if (!isLoggedIn) {
+        needLogin();
+        return;
+      }
+      setComposeNote(note || null);
+      setComposeScheduleAt(extras.scheduleAt ?? null);
+      setComposeRemindAt(extras.remindAt ?? null);
+      setComposeKind(extras.kind ?? note?.kind ?? null);
+      setMode("compose");
+    };
+    if (mode === "compose") leaveComposeThen(enter);
+    else enter();
   }
 
   function afterNoteSaved(note) {
@@ -284,28 +334,34 @@ export default function AppShell({ initialArticleId = "" }) {
   }
 
   function openArticle(a, opts = {}) {
-    setSelected(a);
-    setHighlightCommentId(opts.highlightCommentId || "");
-    setMode("reader");
+    leaveComposeThen(() => {
+      setSelected(a);
+      setHighlightCommentId(opts.highlightCommentId || "");
+      setMode("reader");
+    });
   }
 
-  async function openAuthor(ownerId) {
-    setAuthorId(ownerId);
-    setMode("author");
-    try {
-      const list = await fetchListedArticles({ ownerId });
-      setAuthorArticles(list);
-      await loadProfilesFor(list);
-    } catch (e) {
-      showToast(e.message || "加载陋室失败");
-    }
+  function openAuthor(ownerId) {
+    leaveComposeThen(async () => {
+      setAuthorId(ownerId);
+      setMode("author");
+      try {
+        const list = await fetchListedArticles({ ownerId });
+        setAuthorArticles(list);
+        await loadProfilesFor(list);
+      } catch (e) {
+        showToast(e.message || "加载陋室失败");
+      }
+    });
   }
 
   function needLogin(msg = "请先登录") {
-    setNav("other");
-    setOtherTab("settings");
-    setMode("auth");
-    showToast(msg);
+    leaveComposeThen(() => {
+      setNav("other");
+      setOtherTab("settings");
+      setMode("auth");
+      showToast(msg);
+    });
   }
 
   useEffect(() => {
@@ -317,79 +373,88 @@ export default function AppShell({ initialArticleId = "" }) {
 
   function goNav(id) {
     setRailOpen(false);
-    if (id === "act") {
-      setNav("act");
-      if (!isLoggedIn) {
-        needLogin();
+    const go = () => {
+      if (id === "act") {
+        setNav("act");
+        if (!isLoggedIn) {
+          needLogin();
+          return;
+        }
+        // 窄屏：作为默认停在「新笔记」Tab；宽屏仍直接进编辑
+        if (narrow) {
+          setMode("feed");
+          return;
+        }
+        openCompose(null, { kind: null });
         return;
       }
-      // 窄屏：作为默认停在「新笔记」Tab；宽屏仍直接进编辑
-      if (narrow) {
-        setMode("feed");
+      if (id === "other") {
+        setNav("other");
+        setOtherTab("settings");
+        setMode(isLoggedIn ? "settings" : "auth");
         return;
       }
-      openCompose(null, { kind: null });
-      return;
-    }
-    if (id === "other") {
-      setNav("other");
-      setOtherTab("settings");
-      setMode(isLoggedIn ? "settings" : "auth");
-      return;
-    }
-    setNav(id);
-    setMode("feed");
-    if (id === "tihu") {
-      setHubView("todos");
-      refreshHub().catch(() => {});
-    }
-    if (id === "calendar") {
-      if (!isLoggedIn) {
-        needLogin();
-        return;
+      setNav(id);
+      setMode("feed");
+      if (id === "tihu") {
+        setHubView("todos");
+        refreshHub().catch(() => {});
       }
-      refreshHub().catch(() => {});
-    }
-    if (id === "explore") {
-      setExploreTab("market");
-    }
+      if (id === "calendar") {
+        if (!isLoggedIn) {
+          needLogin();
+          return;
+        }
+        refreshHub().catch(() => {});
+      }
+      if (id === "explore") {
+        setExploreTab("market");
+      }
+    };
+    if (mode === "compose" && id !== "act") leaveComposeThen(go);
+    else if (mode === "compose" && id === "act" && narrow) leaveComposeThen(go);
+    else go();
   }
 
   function openActAi() {
     if (!isLoggedIn) return needLogin();
-    setNav("act");
-    setRailOpen(false);
-    if (!chatId) {
-      const s = createChatSession();
-      setChatId(s.id);
-    }
-    refreshChats();
-    setMode("ai");
+    leaveComposeThen(() => {
+      setNav("act");
+      setRailOpen(false);
+      if (!chatId) {
+        const s = createChatSession();
+        setChatId(s.id);
+      }
+      refreshChats();
+      setMode("ai");
+    });
   }
 
   /** 醍醐侧栏入口：菜单留在左侧，内容进主栏并刷新数据 */
-  async function openHub(view) {
-    if (view !== "reads" && !isLoggedIn) return needLogin();
-    setNav("tihu");
-    setHubView(view);
-    setMode("feed");
-    setSelected(null);
-    setHighlightCommentId("");
-    setRailOpen(false);
-    try {
-      if (view === "reads") {
-        refreshReads();
-        return;
+  function openHub(view) {
+    leaveComposeThen(async () => {
+      if (!isLoggedIn) return needLogin();
+      setNav("tihu");
+      setHubView(view);
+      setMode("feed");
+      setSelected(null);
+      setHighlightCommentId("");
+      setRailOpen(false);
+      try {
+        if (view === "reads") {
+          refreshReads();
+          return;
+        }
+        if (view === "follow") {
+          await Promise.all([refreshFollow(), refreshHub()]);
+          return;
+        }
+        await refreshHub();
+      } catch (e) {
+        if (e?.authExpired) needLogin("登录已过期，请重新登录");
+        else showToast(e.message || "加载失败");
       }
-      if (view === "follow") {
-        await Promise.all([refreshFollow(), refreshHub()]);
-        return;
-      }
-      await refreshHub();
-    } catch (e) {
-      if (e?.authExpired) needLogin("登录已过期，请重新登录");
-      else showToast(e.message || "加载失败");
-    }
+    });
   }
 
   function backToTihuHome() {
@@ -430,7 +495,9 @@ export default function AppShell({ initialArticleId = "" }) {
   );
 
   const mainTitle = (() => {
-    if (mode === "compose") return "写笔记";
+    if (mode === "compose") {
+      return composeNote?.id ? "编辑笔记" : "新笔记";
+    }
     if (mode === "ai") return "找 AI";
     if (mode === "auth") return "登录";
     if (mode === "settings" || (nav === "other" && otherTab === "settings"))
@@ -513,10 +580,12 @@ export default function AppShell({ initialArticleId = "" }) {
                 active={calendarView === "week" && mode === "feed"}
                 onClick={() => {
                   if (!isLoggedIn) return needLogin();
-                  setCalendarView("week");
-                  setMode("feed");
-                  setNav("calendar");
-                  refreshHub().catch(() => {});
+                  leaveComposeThen(() => {
+                    setCalendarView("week");
+                    setMode("feed");
+                    setNav("calendar");
+                    refreshHub().catch(() => {});
+                  });
                 }}
               />
               <HubRow
@@ -526,10 +595,12 @@ export default function AppShell({ initialArticleId = "" }) {
                 active={calendarView === "month" && mode === "feed"}
                 onClick={() => {
                   if (!isLoggedIn) return needLogin();
-                  setCalendarView("month");
-                  setMode("feed");
-                  setNav("calendar");
-                  refreshHub().catch(() => {});
+                  leaveComposeThen(() => {
+                    setCalendarView("month");
+                    setMode("feed");
+                    setNav("calendar");
+                    refreshHub().catch(() => {});
+                  });
                 }}
               />
             </>
@@ -565,9 +636,11 @@ export default function AppShell({ initialArticleId = "" }) {
                 action="打开"
                 active={exploreTab === "market" && mode === "feed"}
                 onClick={() => {
-                  setExploreTab("market");
-                  setMode("feed");
-                  setNav("explore");
+                  leaveComposeThen(() => {
+                    setExploreTab("market");
+                    setMode("feed");
+                    setNav("explore");
+                  });
                 }}
               />
               <HubRow
@@ -577,10 +650,12 @@ export default function AppShell({ initialArticleId = "" }) {
                 active={exploreTab === "mine" && (mode === "feed" || mode === "author")}
                 onClick={() => {
                   if (!isLoggedIn) return needLogin();
-                  setExploreTab("mine");
-                  setMode("feed");
-                  setNav("explore");
-                  refreshMine().catch(() => {});
+                  leaveComposeThen(() => {
+                    setExploreTab("mine");
+                    setMode("feed");
+                    setNav("explore");
+                    refreshMine().catch(() => {});
+                  });
                 }}
               />
             </>
@@ -597,9 +672,11 @@ export default function AppShell({ initialArticleId = "" }) {
                   (mode === "settings" || mode === "auth")
                 }
                 onClick={() => {
-                  setOtherTab("settings");
-                  setMode(isLoggedIn ? "settings" : "auth");
-                  setNav("other");
+                  leaveComposeThen(() => {
+                    setOtherTab("settings");
+                    setMode(isLoggedIn ? "settings" : "auth");
+                    setNav("other");
+                  });
                 }}
               />
               <HubRow
@@ -608,9 +685,11 @@ export default function AppShell({ initialArticleId = "" }) {
                 action="打开"
                 active={otherTab === "support" && mode === "feed"}
                 onClick={() => {
-                  setOtherTab("support");
-                  setMode("feed");
-                  setNav("other");
+                  leaveComposeThen(() => {
+                    setOtherTab("support");
+                    setMode("feed");
+                    setNav("other");
+                  });
                 }}
               />
             </>
@@ -832,17 +911,13 @@ export default function AppShell({ initialArticleId = "" }) {
             <div className="loading">加载中…</div>
           ) : mode === "compose" ? (
             <NoteEditor
+              ref={composeGuardRef}
               key={composeNote?.id || "new"}
               note={composeNote}
               toast={showToast}
               initialScheduleAt={composeScheduleAt}
               initialRemindAt={composeRemindAt}
               initialKind={composeKind}
-              onCancel={() => {
-                clearCompose();
-                setMode("feed");
-                if (nav === "act") setNav("act");
-              }}
               onCreated={async (note) => {
                 await refreshHub().catch(() => {});
                 await refreshExplore().catch(() => {});
@@ -1185,6 +1260,67 @@ export default function AppShell({ initialArticleId = "" }) {
       </main>
 
       {toast ? <div className="toast">{toast}</div> : null}
+
+      {leaveDlg ? (
+        <div className="leave-dialog-backdrop" role="presentation">
+          <div
+            className="leave-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-dialog-title"
+          >
+            <h3 id="leave-dialog-title">内容可能丢失</h3>
+            <p>当前笔记尚未保存，离开可能丢失内容。要保存吗？</p>
+            <div className="leave-dialog-actions">
+              <button
+                type="button"
+                className="btn"
+                disabled={leaveBusy}
+                onClick={async () => {
+                  setLeaveBusy(true);
+                  try {
+                    await composeGuardRef.current?.save?.();
+                    await refreshHub().catch(() => {});
+                    await refreshExplore().catch(() => {});
+                    await refreshMine().catch(() => {});
+                    const run = leaveDlg.run;
+                    setLeaveDlg(null);
+                    clearCompose();
+                    run();
+                  } catch (_) {
+                    /* toast 已在编辑器内 */
+                  } finally {
+                    setLeaveBusy(false);
+                  }
+                }}
+              >
+                {leaveBusy ? "保存中…" : "保存"}
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={leaveBusy}
+                onClick={() => {
+                  const run = leaveDlg.run;
+                  setLeaveDlg(null);
+                  clearCompose();
+                  run();
+                }}
+              >
+                不保存
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={leaveBusy}
+                onClick={() => setLeaveDlg(null)}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

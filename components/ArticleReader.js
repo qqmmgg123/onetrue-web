@@ -10,9 +10,10 @@ import {
   toggleFavorite,
   toggleFollow,
   toggleRecommend,
+  upsertMyRead,
 } from "../lib/api";
 import { displayTitle, formatWhen } from "../lib/format";
-import { upsertArticleRead } from "../lib/recent-reads";
+import { upsertArticleReadLocal } from "../lib/recent-reads";
 import { articleSharePath } from "../lib/site";
 import { useAuth } from "./AuthProvider";
 import { IconHeart, IconStar } from "./icons";
@@ -77,10 +78,14 @@ export default function ArticleReader({
     setReplyTo(null);
     setCommentText("");
 
-    // 本机近期阅读 + 非作者浏览 +1（短时去重，避免 StrictMode 双计）
+    // 近期阅读：仅登录用户（本机缓存 + 云端）；游客不记
     try {
-      upsertArticleRead(article);
-      onReadRecorded?.();
+      const uid = isLoggedIn ? user?.id || "" : "";
+      if (uid) {
+        upsertArticleReadLocal(article, uid);
+        onReadRecorded?.();
+        upsertMyRead(article).catch(() => {});
+      }
     } catch (_) {}
     const last = recentViewBump.get(article.id) || 0;
     if (Date.now() - last > 4000) {
