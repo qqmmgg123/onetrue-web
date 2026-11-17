@@ -10,73 +10,94 @@ import {
   fetchNotifications,
   fetchProfiles,
 } from "../lib/api";
-import {
-  createChatSession,
-  deleteChatSession,
-  listChatSessions,
-} from "../lib/chat-store";
 import { displayTitle, excerpt, formatWhen, snippet } from "../lib/format";
 import {
   listArticleReads,
   readsToArticle,
   replaceUserArticleReadsCache,
 } from "../lib/recent-reads";
-import AiChat from "./AiChat";
+import { articleSharePath } from "../lib/site";
 import ArticleFeed from "./ArticleFeed";
 import ArticleReader from "./ArticleReader";
 import AuthPanel from "./AuthPanel";
 import { useAuth } from "./AuthProvider";
 import CalendarPanel from "./CalendarPanel";
 import {
+  IconBook,
   IconCalendar,
+  IconMemo,
   IconMore,
-  IconTihu,
-  IconExplore,
-  IconEdit,
+  IconNotes,
   IconMenu,
 } from "./icons";
-import NoteEditor from "./NoteEditor";
+import MemoPanel from "./MemoPanel";
+import NoteEditor, { kindActionLabel, kindNoun } from "./NoteEditor";
 import SettingsPanel from "./SettingsPanel";
 import SupportPanel from "./SupportPanel";
 import UserAvatar from "./UserAvatar";
 
 const NAV = [
-  { id: "tihu", label: "醍醐", Icon: IconTihu },
-  { id: "calendar", label: "光阴", Icon: IconCalendar },
-  { id: "explore", label: "求索", Icon: IconExplore },
-  { id: "act", label: "作为", Icon: IconEdit },
+  { id: "notes", label: "笔记", Icon: IconNotes },
+  { id: "memo", label: "备忘", Icon: IconMemo },
+  { id: "calendar", label: "日常", Icon: IconCalendar },
+  { id: "explore", label: "阅读", Icon: IconBook },
   { id: "other", label: "其他", Icon: IconMore },
 ];
 
-export default function AppShell({ initialArticleId = "" }) {
+const EXPLORE_TABS = [
+  { id: "market", label: "推荐的文章" },
+  { id: "follow", label: "留意的文章" },
+  { id: "reads", label: "近期阅读" },
+  { id: "fav", label: "收藏的文章" },
+  { id: "mine", label: "我的文章" },
+  { id: "inbox", label: "留言与回复" },
+  { id: "publish", label: "发布文章" },
+];
+
+function isPlainNote(n) {
+  return !n?.kind || n.kind === "note";
+}
+
+export default function AppShell({
+  initialArticleId = "",
+  initialArticle = null,
+}) {
   const {
     isLoggedIn,
     loading: authLoading,
     user,
     authExpiredTick,
   } = useAuth();
-  const [nav, setNav] = useState("tihu");
+  const [nav, setNav] = useState("explore");
   const [exploreTab, setExploreTab] = useState("market");
-  const [hubView, setHubView] = useState("todos"); // home | todos | notes | reads | fav | follow | inbox
-  const [calendarView, setCalendarView] = useState("week"); // week | month
-  const [otherTab, setOtherTab] = useState("settings"); // settings | support
+  const [otherTab, setOtherTab] = useState("settings");
   const [query] = useState("");
   const [articles, setArticles] = useState([]);
   const [mineArticles, setMineArticles] = useState([]);
   const [followArticles, setFollowArticles] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [notes, setNotes] = useState([]);
+  const [notesHasMore, setNotesHasMore] = useState(false);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesLoadingMore, setNotesLoadingMore] = useState(false);
+  const notesOffsetRef = useRef(0);
+  const notesBusyRef = useRef(false);
+  const notesHasMoreRef = useRef(false);
+  const [hubLoading, setHubLoading] = useState(false);
+  const [exploreLoading, setExploreLoading] = useState(false);
   const [notices, setNotices] = useState([]);
   const [profiles, setProfiles] = useState({});
-  const [selected, setSelected] = useState(null);
-  const [mode, setMode] = useState("feed");
-  // feed | reader | auth | author | compose | ai | act-sheet | settings
+  const [selected, setSelected] = useState(
+    initialArticle?.id ? initialArticle : null,
+  );
+  const [mode, setMode] = useState(
+    initialArticleId || initialArticle?.id ? "reader" : "feed",
+  );
+  // feed | reader | auth | author | compose | settings
   const [authorId, setAuthorId] = useState("");
   const [authorArticles, setAuthorArticles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!(initialArticle?.id));
   const [toast, setToast] = useState("");
-  const [chatId, setChatId] = useState("");
-  const [chatList, setChatList] = useState([]);
   const [composeScheduleAt, setComposeScheduleAt] = useState(null);
   const [composeRemindAt, setComposeRemindAt] = useState(null);
   const [composeKind, setComposeKind] = useState(null);
@@ -85,9 +106,11 @@ export default function AppShell({ initialArticleId = "" }) {
   const [highlightCommentId, setHighlightCommentId] = useState("");
   const [narrow, setNarrow] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
-  const [leaveDlg, setLeaveDlg] = useState(null); // { run: () => void }
+  const [leaveDlg, setLeaveDlg] = useState(null);
   const [leaveBusy, setLeaveBusy] = useState(false);
   const composeGuardRef = useRef(null);
+  const wasGuestRef = useRef(null);
+  const skipDefaultNavRef = useRef(Boolean(initialArticleId));
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -120,13 +143,8 @@ export default function AppShell({ initialArticleId = "" }) {
     showToast._t = window.setTimeout(() => setToast(""), 2600);
   }, []);
 
-  const refreshChats = useCallback(() => {
-    setChatList(listChatSessions());
-  }, []);
-
   const refreshReads = useCallback(async () => {
     const uid = isLoggedIn ? user?.id || "" : "";
-    // 仅登录用户有近期阅读；游客为空
     if (!uid) {
       setRecentReads([]);
       return;
@@ -157,9 +175,14 @@ export default function AppShell({ initialArticleId = "" }) {
   }, []);
 
   const refreshExplore = useCallback(async () => {
-    const list = await fetchListedArticles();
-    setArticles(list);
-    await loadProfilesFor(list);
+    setExploreLoading(true);
+    try {
+      const list = await fetchListedArticles();
+      setArticles(list);
+      await loadProfilesFor(list);
+    } finally {
+      setExploreLoading(false);
+    }
   }, [loadProfilesFor]);
 
   const refreshMine = useCallback(async () => {
@@ -182,37 +205,100 @@ export default function AppShell({ initialArticleId = "" }) {
     await loadProfilesFor(list);
   }, [isLoggedIn, loadProfilesFor]);
 
+  const loadNotesPage = useCallback(async ({ reset = false } = {}) => {
+    if (!isLoggedIn) {
+      setNotes([]);
+      setNotesHasMore(false);
+      notesHasMoreRef.current = false;
+      notesOffsetRef.current = 0;
+      return;
+    }
+    if (notesBusyRef.current) return;
+    if (!reset && !notesHasMoreRef.current) return;
+    notesBusyRef.current = true;
+    if (reset) setNotesLoading(true);
+    else setNotesLoadingMore(true);
+    try {
+      const offset = reset ? 0 : notesOffsetRef.current;
+      const page = await fetchMyNotes({ limit: 40, offset });
+      const batch = page?.notes || (Array.isArray(page) ? page : []);
+      const hasMore =
+        page && typeof page === "object" && !Array.isArray(page)
+          ? Boolean(page.hasMore)
+          : batch.length >= 40;
+      setNotes((prev) => {
+        if (reset) return batch;
+        const seen = new Set(prev.map((n) => n.id));
+        return [...prev, ...batch.filter((n) => n?.id && !seen.has(n.id))];
+      });
+      notesOffsetRef.current = offset + batch.length;
+      notesHasMoreRef.current = hasMore;
+      setNotesHasMore(hasMore);
+    } finally {
+      notesBusyRef.current = false;
+      setNotesLoading(false);
+      setNotesLoadingMore(false);
+    }
+  }, [isLoggedIn]);
+
   const refreshHub = useCallback(async () => {
     if (!isLoggedIn) {
       setFavorites([]);
       setNotes([]);
       setNotices([]);
+      setNotesHasMore(false);
+      notesOffsetRef.current = 0;
+      setHubLoading(false);
       return;
     }
-    const [fav, ns, nts] = await Promise.all([
-      fetchMyFavorites(),
-      fetchMyNotes(),
-      fetchNotifications(),
-    ]);
-    setFavorites(fav);
-    setNotes(ns);
-    setNotices(nts);
-    await loadProfilesFor(fav);
-  }, [isLoggedIn, loadProfilesFor]);
+    setHubLoading(true);
+    try {
+      const [fav, nts] = await Promise.all([
+        fetchMyFavorites(),
+        fetchNotifications(),
+      ]);
+      setFavorites(fav);
+      setNotices(nts);
+      await loadProfilesFor(fav);
+      await loadNotesPage({ reset: true });
+    } finally {
+      setHubLoading(false);
+    }
+  }, [isLoggedIn, loadProfilesFor, loadNotesPage]);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      setLoading(true);
+      if (!initialArticle?.id) setLoading(true);
       try {
         await refreshExplore();
-        if (initialArticleId) {
-          const list = await fetchListedArticles();
-          const found = list.find((a) => a.id === initialArticleId);
+        const aid = initialArticleId || initialArticle?.id || "";
+        if (aid) {
+          skipDefaultNavRef.current = true;
+          setNav("explore");
+          setExploreTab("market");
+          let found = initialArticle?.id === aid ? initialArticle : null;
+          if (!found) {
+            try {
+              found = await fetchListedArticles().then((list) =>
+                list.find((a) => a.id === aid),
+              );
+            } catch (_) {}
+          }
           if (alive && found) {
             setSelected(found);
             setMode("reader");
-            setNav("explore");
+            const path = articleSharePath(found.id);
+            if (
+              typeof window !== "undefined" &&
+              window.location.pathname !== path
+            ) {
+              window.history.replaceState(
+                { articleId: found.id },
+                "",
+                path,
+              );
+            }
           }
         }
       } catch (e) {
@@ -224,22 +310,97 @@ export default function AppShell({ initialArticleId = "" }) {
     return () => {
       alive = false;
     };
-  }, [initialArticleId, refreshExplore, showToast]);
+  }, [initialArticleId, initialArticle, refreshExplore, showToast]);
+
+  // 浏览器前进/后退同步文章路由
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onPop = () => {
+      const m = window.location.pathname.match(/^\/a\/([^/]+)\/?$/);
+      if (m?.[1]) {
+        const id = decodeURIComponent(m[1]);
+        const fromLists = [
+          ...articles,
+          ...mineArticles,
+          ...followArticles,
+          ...favorites,
+          ...recentReads.map(readsToArticle).filter(Boolean),
+        ];
+        const found =
+          fromLists.find((a) => a?.id === id) ||
+          (selected?.id === id ? selected : null);
+        if (found) {
+          setSelected(found);
+          setMode("reader");
+          setNav("explore");
+          return;
+        }
+        fetchListedArticles()
+          .then((list) => {
+            const a = list.find((x) => x.id === id);
+            if (a) {
+              setSelected(a);
+              setMode("reader");
+              setNav("explore");
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+      if (mode === "reader" || mode === "author") {
+        setMode("feed");
+        setSelected(null);
+        setHighlightCommentId("");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [
+    articles,
+    mineArticles,
+    followArticles,
+    favorites,
+    recentReads,
+    selected,
+    mode,
+  ]);
 
   useEffect(() => {
     if (authLoading) return;
+    const guest = !isLoggedIn;
+    if (wasGuestRef.current == null) {
+      wasGuestRef.current = guest;
+      if (!skipDefaultNavRef.current) {
+        setNav(guest ? "explore" : "notes");
+        if (!guest) {
+          setMode("compose");
+          setComposeKind("note");
+          setComposeNote(null);
+        }
+      }
+    } else if (wasGuestRef.current !== guest) {
+      wasGuestRef.current = guest;
+      setNav(guest ? "explore" : "notes");
+      setMode(guest ? "feed" : "compose");
+      setExploreTab("market");
+      if (!guest) {
+        setComposeKind("note");
+        setComposeNote(null);
+      } else {
+        clearCompose();
+      }
+    }
     refreshHub().catch(() => {});
     refreshFollow().catch(() => {});
     if (isLoggedIn) refreshMine().catch(() => {});
-    refreshChats();
     refreshReads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     authLoading,
     isLoggedIn,
     refreshHub,
     refreshFollow,
     refreshMine,
-    refreshChats,
     refreshReads,
   ]);
 
@@ -255,18 +416,21 @@ export default function AppShell({ initialArticleId = "" }) {
     [query],
   );
 
-  const todos = useMemo(
+  const noteList = useMemo(
     () =>
-      notes.filter(
-        (n) => n.kind === "memo" || n.kind === "schedule",
-      ),
+      notes
+        .filter(isPlainNote)
+        .slice()
+        .sort((a, b) =>
+          String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")),
+        ),
     [notes],
   );
 
-  const todoPreview = todos[0] || null;
-  const latestNote = notes[0] || null;
-  // 只用 state，避免首屏读 localStorage 与 SSR 文字不一致（hydration error）
-  const latestRead = recentReads[0] || null;
+  const scheduleNotes = useMemo(
+    () => notes.filter((n) => n.kind === "schedule"),
+    [notes],
+  );
 
   function clearCompose() {
     setComposeScheduleAt(null);
@@ -275,7 +439,6 @@ export default function AppShell({ initialArticleId = "" }) {
     setComposeNote(null);
   }
 
-  /** 离开写笔记/编辑页：有改动则提示保存 / 不保存 / 取消 */
   function leaveComposeThen(run) {
     if (mode !== "compose") {
       run();
@@ -286,7 +449,12 @@ export default function AppShell({ initialArticleId = "" }) {
       run();
       return;
     }
-    setLeaveDlg({ run });
+    const k =
+      composeGuardRef.current?.getKind?.() ||
+      composeKind ||
+      composeNote?.kind ||
+      "note";
+    setLeaveDlg({ run, kind: k });
   }
 
   function openCompose(note = null, extras = {}) {
@@ -306,31 +474,44 @@ export default function AppShell({ initialArticleId = "" }) {
   }
 
   function afterNoteSaved(note) {
-    clearCompose();
-    if (note?.listingStatus === "listed") {
-      openArticle({
-        id: note.id,
-        title: note.title,
-        body: note.body,
-        format: note.format,
-        city: note.city || "",
-        listedAt: note.listedAt || note.updatedAt,
-        ownerId: note.ownerId || user?.id || "",
-        viewCount: 0,
-        recommendCount: 0,
-        commentCount: 0,
-      });
-      setNav("explore");
+    if (note?.kind === "memo") {
+      clearCompose();
+      setMode("feed");
+      setNav("memo");
       return;
     }
-    if (note?.kind === "schedule" || note?.kind === "memo") {
+    if (note?.kind === "schedule") {
+      clearCompose();
       setMode("feed");
       setNav("calendar");
       return;
     }
-    setMode("feed");
-    setNav("tihu");
-    setHubView("notes");
+    if (note?.kind === "article") {
+      clearCompose();
+      setNav("explore");
+      setExploreTab("mine");
+      setMode("feed");
+      refreshMine().catch(() => {});
+      return;
+    }
+    // 笔记：留在编辑页
+    setComposeNote(note || null);
+    setComposeKind("note");
+    setComposeScheduleAt(null);
+    setComposeRemindAt(null);
+    setNav("notes");
+    setMode("compose");
+  }
+
+  function syncArticleUrl(articleId) {
+    if (typeof window === "undefined") return;
+    const path = articleId ? articleSharePath(articleId) : "/";
+    if (window.location.pathname === path) return;
+    window.history.pushState(
+      articleId ? { articleId } : {},
+      "",
+      path,
+    );
   }
 
   function openArticle(a, opts = {}) {
@@ -338,7 +519,16 @@ export default function AppShell({ initialArticleId = "" }) {
       setSelected(a);
       setHighlightCommentId(opts.highlightCommentId || "");
       setMode("reader");
+      setNav("explore");
+      if (a?.id) syncArticleUrl(a.id);
     });
+  }
+
+  function closeReader() {
+    setMode("feed");
+    setSelected(null);
+    setHighlightCommentId("");
+    syncArticleUrl("");
   }
 
   function openAuthor(ownerId) {
@@ -350,7 +540,7 @@ export default function AppShell({ initialArticleId = "" }) {
         setAuthorArticles(list);
         await loadProfilesFor(list);
       } catch (e) {
-        showToast(e.message || "加载陋室失败");
+        showToast(e.message || "加载失败");
       }
     });
   }
@@ -367,118 +557,94 @@ export default function AppShell({ initialArticleId = "" }) {
   useEffect(() => {
     if (!authExpiredTick) return;
     needLogin("登录已过期，请重新登录");
-    // needLogin / showToast 稳定即可；只跟过期事件走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authExpiredTick]);
 
   function goNav(id) {
     setRailOpen(false);
     const go = () => {
-      if (id === "act") {
-        setNav("act");
-        if (!isLoggedIn) {
-          needLogin();
-          return;
-        }
-        // 窄屏：作为默认停在「新笔记」Tab；宽屏仍直接进编辑
-        if (narrow) {
-          setMode("feed");
-          return;
-        }
-        openCompose(null, { kind: null });
-        return;
-      }
       if (id === "other") {
         setNav("other");
         setOtherTab("settings");
         setMode(isLoggedIn ? "settings" : "auth");
+        clearCompose();
+        return;
+      }
+      if (id === "notes") {
+        setNav("notes");
+        if (!isLoggedIn) {
+          clearCompose();
+          setMode("feed");
+          return;
+        }
+        setComposeNote(null);
+        setComposeKind("note");
+        setComposeScheduleAt(null);
+        setComposeRemindAt(null);
+        setMode("compose");
+        refreshHub().catch(() => {});
+        return;
+      }
+      if (id === "memo") {
+        setNav("memo");
+        clearCompose();
+        setMode("feed");
+        refreshHub().catch(() => {});
+        return;
+      }
+      if (id === "calendar") {
+        setNav("calendar");
+        clearCompose();
+        setMode("feed");
+        if (isLoggedIn) refreshHub().catch(() => {});
+        return;
+      }
+      if (id === "explore") {
+        setNav("explore");
+        clearCompose();
+        setMode("feed");
+        setExploreTab("market");
         return;
       }
       setNav(id);
       setMode("feed");
-      if (id === "tihu") {
-        setHubView("todos");
-        refreshHub().catch(() => {});
-      }
-      if (id === "calendar") {
-        if (!isLoggedIn) {
-          needLogin();
-          return;
-        }
-        refreshHub().catch(() => {});
-      }
-      if (id === "explore") {
-        setExploreTab("market");
-      }
     };
-    if (mode === "compose" && id !== "act") leaveComposeThen(go);
-    else if (mode === "compose" && id === "act" && narrow) leaveComposeThen(go);
+    if (mode === "compose") leaveComposeThen(go);
     else go();
   }
 
-  function openActAi() {
-    if (!isLoggedIn) return needLogin();
+  function openExploreTab(tabId) {
     leaveComposeThen(() => {
-      setNav("act");
-      setRailOpen(false);
-      if (!chatId) {
-        const s = createChatSession();
-        setChatId(s.id);
+      if (tabId === "publish") {
+        if (!isLoggedIn) return needLogin();
+        setNav("explore");
+        setExploreTab("mine");
+        openCompose(null, { kind: "article" });
+        return;
       }
-      refreshChats();
-      setMode("ai");
-    });
-  }
-
-  /** 醍醐侧栏入口：菜单留在左侧，内容进主栏并刷新数据 */
-  function openHub(view) {
-    leaveComposeThen(async () => {
-      if (!isLoggedIn) return needLogin();
-      setNav("tihu");
-      setHubView(view);
+      const needsAuth = tabId !== "market";
+      if (needsAuth && !isLoggedIn) return needLogin();
+      setNav("explore");
+      setExploreTab(tabId);
       setMode("feed");
       setSelected(null);
       setHighlightCommentId("");
       setRailOpen(false);
-      try {
-        if (view === "reads") {
-          refreshReads();
-          return;
-        }
-        if (view === "follow") {
-          await Promise.all([refreshFollow(), refreshHub()]);
-          return;
-        }
-        await refreshHub();
-      } catch (e) {
-        if (e?.authExpired) needLogin("登录已过期，请重新登录");
-        else showToast(e.message || "加载失败");
-      }
+      if (tabId === "follow") refreshFollow().catch(() => {});
+      if (tabId === "fav" || tabId === "inbox") refreshHub().catch(() => {});
+      if (tabId === "reads") refreshReads();
+      if (tabId === "mine") refreshMine().catch(() => {});
     });
   }
 
-  function backToTihuHome() {
-    setHubView("home");
-    setMode("feed");
-    setSelected(null);
-    setHighlightCommentId("");
-  }
-
-  const tihuDrilled =
-    narrow &&
-    nav === "tihu" &&
-    (hubView !== "home" ||
-      mode === "reader" ||
-      mode === "author" ||
-      mode === "compose" ||
-      mode === "ai");
+  // 备忘 / 日常无二级侧栏内容：隐藏中间列，主区铺满
+  const hideMiddle = nav === "memo" || nav === "calendar";
 
   const shellClass = [
     "shell",
     narrow ? "is-narrow" : "",
     railOpen ? "rail-open" : "",
-    narrow && nav === "tihu" ? "tihu-mobile" : "",
-    tihuDrilled ? "tihu-drilled" : "",
+    hideMiddle ? "no-middle" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -496,36 +662,173 @@ export default function AppShell({ initialArticleId = "" }) {
 
   const mainTitle = (() => {
     if (mode === "compose") {
-      return composeNote?.id ? "编辑笔记" : "新笔记";
+      const k = composeKind || composeNote?.kind || "note";
+      return composeNote?.id ? `编辑${kindNoun(k)}` : `新${kindNoun(k)}`;
     }
-    if (mode === "ai") return "找 AI";
     if (mode === "auth") return "登录";
     if (mode === "settings" || (nav === "other" && otherTab === "settings"))
       return "账号和设置";
     if (nav === "other" && otherTab === "support") return "客服和联系";
     if (mode === "reader" && selected)
       return displayTitle(selected.title, selected.body);
-    if (mode === "author") return profiles[authorId]?.displayName || "陋室";
-    if (nav === "explore") return exploreTab === "mine" ? "陋室" : "雅集";
-    if (nav === "calendar") return calendarView === "month" ? "月历" : "周历";
-    if (nav === "tihu") {
-      const map = {
-        home: "醍醐",
-        todos: "待办事项",
-        notes: "近期笔记",
-        reads: "近期阅读",
-        fav: "我的收藏",
-        follow: "留意的人",
-        inbox: "评点和回书",
-      };
-      return map[hubView] || "醍醐";
+    if (mode === "author") return profiles[authorId]?.displayName || "作者";
+    if (nav === "explore") {
+      return (
+        EXPLORE_TABS.find((t) => t.id === exploreTab)?.label || "阅读"
+      );
     }
-    return "醍醐";
+    if (nav === "calendar") return "日常";
+    if (nav === "notes") return "笔记";
+    if (nav === "memo") return "备忘";
+    return NAV.find((n) => n.id === nav)?.label || "醍醐";
   })();
 
-  const exploreList = filterList(
-    exploreTab === "mine" ? mineArticles : articles,
-  );
+  const leaveKind = leaveDlg?.kind || "note";
+
+  function renderExploreMain() {
+    if (!isLoggedIn && exploreTab !== "market") {
+      return (
+        <div className="empty login-cta">
+          <p>登录后可查看此内容</p>
+          <button type="button" className="btn" onClick={() => needLogin()}>
+            登录
+          </button>
+        </div>
+      );
+    }
+    if (
+      (exploreTab === "market" && (loading || exploreLoading)) ||
+      (exploreTab === "fav" && hubLoading) ||
+      (exploreTab === "inbox" && hubLoading) ||
+      (exploreTab === "mine" && exploreLoading) ||
+      (exploreTab === "follow" && exploreLoading)
+    ) {
+      return <div className="panel-loading">加载中…</div>;
+    }
+    if (exploreTab === "reads") {
+      return (
+        <div className="hub-main-list">
+          {recentReads.length === 0 ? (
+            <div className="empty">还没有阅读记录。去「推荐的文章」点开后会出现在这里。</div>
+          ) : (
+            recentReads.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className="list-item"
+                onClick={() => {
+                  const a = readsToArticle(r);
+                  if (a) openArticle(a);
+                }}
+              >
+                <UserAvatar
+                  profile={profiles[r.ownerId] || { displayName: "读" }}
+                />
+                <div>
+                  <div className="title">
+                    {displayTitle(r.title, r.body)}
+                  </div>
+                  <div className="meta">{snippet(r.title, r.body, 40)}</div>
+                </div>
+                <div className="time">{formatWhen(r.lastReadAt)}</div>
+              </button>
+            ))
+          )}
+        </div>
+      );
+    }
+    if (exploreTab === "fav") {
+      return (
+        <ArticleFeed
+          articles={filterList(favorites)}
+          profiles={profiles}
+          selectedId={selected?.id}
+          onSelect={openArticle}
+          emptyText="还没有收藏"
+        />
+      );
+    }
+    if (exploreTab === "follow") {
+      return (
+        <ArticleFeed
+          articles={filterList(followArticles)}
+          profiles={profiles}
+          selectedId={selected?.id}
+          onSelect={openArticle}
+          emptyText="留意作者后，这里会出现动态"
+        />
+      );
+    }
+    if (exploreTab === "inbox") {
+      return (
+        <div className="hub-main-list">
+          {notices.length === 0 ? (
+            <div className="empty">暂无留言或回复</div>
+          ) : (
+            notices.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                className="hub-row"
+                onClick={async () => {
+                  if (!n.noteId) return;
+                  try {
+                    const list = await fetchListedArticles();
+                    const a = list.find((x) => x.id === n.noteId);
+                    if (a) {
+                      openArticle(a, {
+                        highlightCommentId: n.commentId || "",
+                      });
+                    } else showToast("文章可能已删除");
+                  } catch (e) {
+                    showToast(e.message || "打开失败");
+                  }
+                }}
+              >
+                <div className="row-top">
+                  <span className="label">
+                    {n.actor?.displayName || "有人"}
+                  </span>
+                  <span className="action">{formatWhen(n.createdAt)}</span>
+                </div>
+                <div className="summary">
+                  {n.kind === "follow"
+                    ? "留意了你"
+                    : n.kind === "recommend"
+                      ? "推荐了你的文章"
+                      : n.kind === "reply"
+                        ? "回复了你"
+                        : n.kind === "comment"
+                          ? "留言了你的文章"
+                          : n.body || n.kind}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      );
+    }
+    if (exploreTab === "mine") {
+      return (
+        <ArticleFeed
+          articles={filterList(mineArticles)}
+          profiles={profiles}
+          selectedId={selected?.id}
+          onSelect={openArticle}
+          emptyText="还没有文章，点左侧「发布文章」写一篇"
+        />
+      );
+    }
+    return (
+      <ArticleFeed
+        articles={filterList(articles)}
+        profiles={profiles}
+        selectedId={selected?.id}
+        onSelect={openArticle}
+        emptyText="暂无推荐文章"
+      />
+    );
+  }
 
   return (
     <div className={shellClass}>
@@ -557,107 +860,121 @@ export default function AppShell({ initialArticleId = "" }) {
           <div className="middle-head-text">
             <h1>{NAV.find((n) => n.id === nav)?.label || "醍醐"}</h1>
             <p className="middle-sub">
-              {nav === "tihu"
-                ? "待办 · 笔记 · 阅读 · 留意"
-                : nav === "calendar"
-                  ? "周历与月历"
-                  : nav === "explore"
-                    ? "雅集与陋室"
-                    : nav === "act"
-                      ? "新笔记或找 AI"
+              {nav === "notes"
+                ? "随笔列表"
+                : nav === "memo"
+                  ? "备忘卡片"
+                  : nav === "calendar"
+                    ? "周历"
+                    : nav === "explore"
+                      ? "推荐 · 留意 · 收藏"
                       : "账号与反馈"}
             </p>
           </div>
         </div>
 
-        <div className="middle-body">
-          {nav === "calendar" ? (
+        <div
+          className="middle-body"
+          onScroll={(e) => {
+            if (nav !== "notes" || !isLoggedIn) return;
+            if (!notesHasMore || notesLoadingMore || notesLoading) return;
+            const el = e.currentTarget;
+            if (el.scrollHeight - el.scrollTop - el.clientHeight < 96) {
+              loadNotesPage({ reset: false });
+            }
+          }}
+        >
+          {nav === "notes" ? (
             <>
               <HubRow
-                title="周历"
-                summary="按小时查看本周日程与备忘"
-                action="打开"
-                active={calendarView === "week" && mode === "feed"}
+                title="＋ 新笔记"
+                summary="写一篇新的笔记"
+                action="写"
+                active={
+                  mode === "compose" &&
+                  !composeNote?.id &&
+                  (composeKind === "note" || !composeKind)
+                }
                 onClick={() => {
                   if (!isLoggedIn) return needLogin();
-                  leaveComposeThen(() => {
-                    setCalendarView("week");
-                    setMode("feed");
-                    setNav("calendar");
-                    refreshHub().catch(() => {});
-                  });
+                  openCompose(null, { kind: "note" });
                 }}
               />
-              <HubRow
-                title="月历"
-                summary="按月浏览，点日期看当天"
-                action="打开"
-                active={calendarView === "month" && mode === "feed"}
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  leaveComposeThen(() => {
-                    setCalendarView("month");
-                    setMode("feed");
-                    setNav("calendar");
-                    refreshHub().catch(() => {});
-                  });
-                }}
-              />
+              {authLoading || (isLoggedIn && (hubLoading || notesLoading)) ? (
+                <div className="middle-loading">加载笔记中…</div>
+              ) : !isLoggedIn ? (
+                <div className="empty" style={{ padding: 16 }}>
+                  登录后查看笔记列表
+                </div>
+              ) : (
+                <>
+                  {noteList.map((n) => (
+                    <HubRow
+                      key={n.id}
+                      title={displayTitle(n.title, n.body, "无标题", n.format)}
+                      summary={formatWhen(n.updatedAt)}
+                      action="打开"
+                      active={mode === "compose" && composeNote?.id === n.id}
+                      onClick={() => openCompose(n)}
+                    />
+                  ))}
+                  {noteList.length === 0 ? (
+                    <div className="empty" style={{ padding: 16 }}>
+                      还没有笔记
+                    </div>
+                  ) : null}
+                  {notesLoadingMore ? (
+                    <div className="middle-load-more">加载更多…</div>
+                  ) : null}
+                  {!notesLoadingMore && notesHasMore && noteList.length > 0 ? (
+                    <button
+                      type="button"
+                      className="middle-load-more"
+                      style={{ width: "100%", border: 0, background: "transparent" }}
+                      onClick={() => loadNotesPage({ reset: false })}
+                    >
+                      下拉或点击加载更多
+                    </button>
+                  ) : null}
+                </>
+              )}
             </>
           ) : null}
 
-          {nav === "act" ? (
-            <>
-              <HubRow
-                title="新笔记"
-                summary="写随笔、备忘、日程或文章"
-                action="打开"
-                active={mode === "compose"}
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  openCompose(null, { kind: null });
-                }}
-              />
-              <HubRow
-                title="找 AI"
-                summary="闲聊，也能记笔记、改日程"
-                action="打开"
-                active={mode === "ai"}
-                onClick={openActAi}
-              />
-            </>
-          ) : null}
 
           {nav === "explore" ? (
             <>
-              <HubRow
-                title="雅集"
-                summary="浏览上架文章"
-                action="打开"
-                active={exploreTab === "market" && mode === "feed"}
-                onClick={() => {
-                  leaveComposeThen(() => {
-                    setExploreTab("market");
-                    setMode("feed");
-                    setNav("explore");
-                  });
-                }}
-              />
-              <HubRow
-                title="陋室"
-                summary="我上架的文章"
-                action="打开"
-                active={exploreTab === "mine" && (mode === "feed" || mode === "author")}
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  leaveComposeThen(() => {
-                    setExploreTab("mine");
-                    setMode("feed");
-                    setNav("explore");
-                    refreshMine().catch(() => {});
-                  });
-                }}
-              />
+              {EXPLORE_TABS.map((t) => (
+                <HubRow
+                  key={t.id}
+                  title={t.id === "publish" ? "＋ 发布文章" : t.label}
+                  summary={
+                    t.id === "publish"
+                      ? "写一篇文章"
+                      : t.id === "market"
+                        ? "浏览推荐"
+                        : t.id === "follow"
+                          ? "留意的人更新"
+                          : t.id === "reads"
+                            ? "最近读过的"
+                            : t.id === "fav"
+                              ? "收藏过的文章"
+                              : t.id === "mine"
+                                ? "我写的文章"
+                                : "留言与回复"
+                  }
+                  action={t.id === "publish" ? "写" : "打开"}
+                  active={
+                    t.id === "publish"
+                      ? mode === "compose" && composeKind === "article"
+                      : exploreTab === t.id &&
+                        (mode === "feed" ||
+                          mode === "reader" ||
+                          mode === "author")
+                  }
+                  onClick={() => openExploreTab(t.id)}
+                />
+              ))}
             </>
           ) : null}
 
@@ -694,68 +1011,6 @@ export default function AppShell({ initialArticleId = "" }) {
               />
             </>
           ) : null}
-
-          {nav === "tihu" ? (
-            <>
-              <HubRow
-                title="待办事项"
-                summary={
-                  todoPreview
-                    ? displayTitle(todoPreview.title, todoPreview.body)
-                    : "暂无备忘或日程。"
-                }
-                action="打开"
-                active={hubView === "todos" && mode === "feed"}
-                onClick={() => openHub("todos")}
-              />
-              <HubRow
-                title="近期笔记"
-                summary={
-                  latestNote
-                    ? snippet(latestNote.title, latestNote.body, 40)
-                    : "还没有笔记，去「作为」写一篇吧。"
-                }
-                action="打开"
-                active={hubView === "notes" && mode === "feed"}
-                onClick={() => openHub("notes")}
-              />
-              <HubRow
-                title="近期阅读"
-                summary={
-                  latestRead
-                    ? `${displayTitle(latestRead.title, latestRead.body)} · ${formatWhen(latestRead.lastReadAt)}`
-                    : "还没有阅读记录。"
-                }
-                action="打开"
-                active={hubView === "reads" && mode === "feed"}
-                onClick={() => openHub("reads")}
-              />
-              <HubRow
-                title="我的收藏"
-                summary="收藏过的文章"
-                action="打开"
-                active={hubView === "fav" && (mode === "feed" || mode === "reader")}
-                onClick={() => openHub("fav")}
-              />
-              <HubRow
-                title="留意的人"
-                summary="留意用户最新上架的文章"
-                action="打开"
-                active={
-                  hubView === "follow" && (mode === "feed" || mode === "reader")
-                }
-                onClick={() => openHub("follow")}
-              />
-              <HubRow
-                title="评点和回书"
-                summary="别人评点、回书或推荐你的文章"
-                action="打开"
-                active={hubView === "inbox" && mode === "feed"}
-                onClick={() => openHub("inbox")}
-              />
-            </>
-          ) : null}
-
         </div>
       </section>
 
@@ -763,18 +1018,6 @@ export default function AppShell({ initialArticleId = "" }) {
         <div className="main-head">
           <div className="main-head-left">
             {menuBtn}
-            {narrow &&
-            nav === "tihu" &&
-            hubView !== "home" &&
-            mode === "feed" ? (
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={backToTihuHome}
-              >
-                返回
-              </button>
-            ) : null}
             <h2>{mainTitle}</h2>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -782,7 +1025,14 @@ export default function AppShell({ initialArticleId = "" }) {
               <button
                 type="button"
                 className="btn ghost"
-                onClick={() => setMode("feed")}
+                onClick={() => {
+                  if (mode === "author") {
+                    setMode(selected ? "reader" : "feed");
+                    if (!selected) syncArticleUrl("");
+                    return;
+                  }
+                  closeReader();
+                }}
               >
                 返回
               </button>
@@ -800,83 +1050,19 @@ export default function AppShell({ initialArticleId = "" }) {
               </button>
             ) : null}
           </div>
-          {narrow && nav === "calendar" && mode === "feed" ? (
+          {narrow && nav === "explore" && mode !== "compose" ? (
             <div className="mobile-tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                className={`mobile-tab${calendarView === "week" ? " active" : ""}`}
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setCalendarView("week");
-                  refreshHub().catch(() => {});
-                }}
-              >
-                周历
-              </button>
-              <button
-                type="button"
-                role="tab"
-                className={`mobile-tab${calendarView === "month" ? " active" : ""}`}
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setCalendarView("month");
-                  refreshHub().catch(() => {});
-                }}
-              >
-                月历
-              </button>
-            </div>
-          ) : null}
-          {narrow && nav === "explore" && (mode === "feed" || mode === "author") ? (
-            <div className="mobile-tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                className={`mobile-tab${exploreTab === "market" && mode === "feed" ? " active" : ""}`}
-                onClick={() => {
-                  setExploreTab("market");
-                  setMode("feed");
-                }}
-              >
-                雅集
-              </button>
-              <button
-                type="button"
-                role="tab"
-                className={`mobile-tab${exploreTab === "mine" ? " active" : ""}`}
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  setExploreTab("mine");
-                  setMode("feed");
-                  refreshMine().catch(() => {});
-                }}
-              >
-                陋室
-              </button>
-            </div>
-          ) : null}
-          {narrow && nav === "act" ? (
-            <div className="mobile-tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                className={`mobile-tab${mode === "compose" || mode === "feed" ? " active" : ""}`}
-                onClick={() => {
-                  if (!isLoggedIn) return needLogin();
-                  openCompose(null, { kind: null });
-                }}
-              >
-                新笔记
-              </button>
-              <button
-                type="button"
-                role="tab"
-                className={`mobile-tab${mode === "ai" ? " active" : ""}`}
-                onClick={openActAi}
-              >
-                找 AI
-              </button>
+              {EXPLORE_TABS.filter((t) => t.id !== "publish").map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  className={`mobile-tab${exploreTab === t.id && mode === "feed" ? " active" : ""}`}
+                  onClick={() => openExploreTab(t.id)}
+                >
+                  {t.label.replace(/的文章$/, "").replace(/与回复$/, "")}
+                </button>
+              ))}
             </div>
           ) : null}
           {narrow && nav === "other" ? (
@@ -906,13 +1092,18 @@ export default function AppShell({ initialArticleId = "" }) {
             </div>
           ) : null}
         </div>
-        <div className={`main-body${mode === "ai" || mode === "compose" ? " main-body-flush" : ""}`}>
+        <div
+          className={`main-body${mode === "compose" ? " main-body-flush" : ""}`}
+        >
           {loading || authLoading ? (
             <div className="loading">加载中…</div>
           ) : mode === "compose" ? (
             <NoteEditor
               ref={composeGuardRef}
-              key={composeNote?.id || "new"}
+              key={
+                composeNote?.id ||
+                `new:${composeKind || "note"}:${composeScheduleAt || ""}`
+              }
               note={composeNote}
               toast={showToast}
               initialScheduleAt={composeScheduleAt}
@@ -931,89 +1122,11 @@ export default function AppShell({ initialArticleId = "" }) {
                 afterNoteSaved(note);
               }}
             />
-          ) : mode === "ai" ? (
-            <div className="ai-split">
-              <div className="ai-split-main">
-                <AiChat
-                  sessionId={chatId}
-                  onSessionChange={(id) => {
-                    setChatId(id);
-                    refreshChats();
-                  }}
-                  onNeedLogin={needLogin}
-                  onNotesChanged={() => {
-                    refreshHub().catch(() => {});
-                    refreshExplore().catch(() => {});
-                    refreshMine().catch(() => {});
-                  }}
-                  toast={showToast}
-                />
-              </div>
-              <aside className="ai-split-aside">
-                <div className="ai-aside-head">
-                  <strong>对话</strong>
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    style={{ fontSize: 12, padding: "4px 8px" }}
-                    onClick={() => {
-                      const s = createChatSession();
-                      setChatId(s.id);
-                      refreshChats();
-                    }}
-                  >
-                    新对话
-                  </button>
-                </div>
-                <div className="ai-aside-list">
-                  {chatList.length === 0 ? (
-                    <div className="empty" style={{ padding: 16 }}>
-                      暂无历史对话
-                    </div>
-                  ) : (
-                    chatList.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className={`ai-aside-item ${chatId === s.id ? "active" : ""}`}
-                        onClick={() => setChatId(s.id)}
-                      >
-                        <div className="title">{s.title || "对话"}</div>
-                        <div className="meta">
-                          <span>{formatWhen(s.updatedAt)}</span>
-                          <span
-                            className="ai-aside-del"
-                            role="button"
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteChatSession(s.id);
-                              refreshChats();
-                              if (chatId === s.id) {
-                                const next = listChatSessions()[0];
-                                setChatId(next?.id || "");
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") e.currentTarget.click();
-                            }}
-                          >
-                            删
-                          </span>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </aside>
-            </div>
           ) : mode === "auth" ? (
             <AuthPanel
               onDone={() => {
-                setOtherTab("settings");
-                setMode("settings");
-                setNav("other");
                 showToast("登录成功");
+                // 登录默认落到笔记（wasGuest sync）
               }}
             />
           ) : nav === "other" && otherTab === "support" && mode === "feed" ? (
@@ -1061,7 +1174,7 @@ export default function AppShell({ initialArticleId = "" }) {
                     <div className="name">
                       {profiles[authorId]?.displayName || "作者"}
                     </div>
-                    <div className="sub">陋室 · {authorArticles.length} 篇</div>
+                    <div className="sub">{authorArticles.length} 篇</div>
                   </div>
                 </div>
               </div>
@@ -1070,189 +1183,51 @@ export default function AppShell({ initialArticleId = "" }) {
                 profiles={profiles}
                 selectedId={selected?.id}
                 onSelect={openArticle}
-                emptyText="此作者暂无上架文章"
+                emptyText="此作者暂无文章"
               />
             </div>
+          ) : nav === "notes" ? (
+            !isLoggedIn ? (
+              <div className="empty login-cta">
+                <p>登录后开始写笔记</p>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => needLogin()}
+                >
+                  去登录
+                </button>
+              </div>
+            ) : (
+              <div className="empty">从左侧点「＋ 新笔记」或打开一篇笔记</div>
+            )
+          ) : nav === "memo" ? (
+            <MemoPanel
+              notes={notes}
+              loading={authLoading || hubLoading || notesLoading}
+              isLoggedIn={isLoggedIn}
+              onNeedLogin={needLogin}
+              onCompose={(extras) => openCompose(null, extras)}
+              onEdit={(n) => openCompose(n)}
+              onChanged={() => refreshHub().catch(() => {})}
+              toast={showToast}
+            />
           ) : nav === "calendar" ? (
             <CalendarPanel
-              notes={notes}
-              view={calendarView}
-              onViewChange={setCalendarView}
+              notes={scheduleNotes}
+              view="week"
               onOpenNote={(n) => openCompose(n)}
               onCreateSchedule={(at) => {
+                if (!isLoggedIn) return needLogin();
                 const iso = at instanceof Date ? at.toISOString() : at;
                 openCompose(null, {
                   scheduleAt: iso,
                   kind: "schedule",
                 });
               }}
-              onCreateMemo={(at) => {
-                const iso = at instanceof Date ? at.toISOString() : at;
-                openCompose(null, {
-                  remindAt: iso,
-                  kind: "memo",
-                });
-              }}
             />
-          ) : nav === "tihu" && hubView === "todos" ? (
-            <div className="hub-main-list">
-              {todos.length === 0 ? (
-                <div className="empty">暂无备忘或日程</div>
-              ) : (
-                todos.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className="list-item"
-                    onClick={() => openCompose(n)}
-                  >
-                    <UserAvatar profile={{ displayName: n.kind }} />
-                    <div>
-                      <div className="title">
-                        {displayTitle(n.title, n.body)}
-                      </div>
-                      <div className="meta">
-                        {n.kind === "schedule" ? "日程" : "备忘"}
-                      </div>
-                    </div>
-                    <div className="time">
-                      {formatWhen(n.scheduleAt || n.remindAt || n.updatedAt)}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          ) : nav === "tihu" && hubView === "notes" ? (
-            <div className="hub-main-list">
-              {notes.length === 0 ? (
-                <div className="empty">还没有笔记，去「作为」写一篇吧</div>
-              ) : (
-                notes.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className="list-item"
-                    onClick={() => openCompose(n)}
-                  >
-                    <UserAvatar profile={{ displayName: n.kind || "笔" }} />
-                    <div>
-                      <div className="title">
-                        {displayTitle(n.title, n.body)}
-                      </div>
-                      <div className="meta">{snippet(n.title, n.body, 40)}</div>
-                    </div>
-                    <div className="time">{formatWhen(n.updatedAt)}</div>
-                  </button>
-                ))
-              )}
-            </div>
-          ) : nav === "tihu" && hubView === "reads" ? (
-            <div className="hub-main-list">
-              {recentReads.length === 0 ? (
-                <div className="empty">
-                  还没有阅读记录。去「求索 → 雅集」点开文章后会出现在这里。
-                </div>
-              ) : (
-                recentReads.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    className="list-item"
-                    onClick={() => {
-                      const a = readsToArticle(r);
-                      if (a) openArticle(a);
-                    }}
-                  >
-                    <UserAvatar
-                      profile={profiles[r.ownerId] || { displayName: "读" }}
-                    />
-                    <div>
-                      <div className="title">
-                        {displayTitle(r.title, r.body)}
-                      </div>
-                      <div className="meta">{snippet(r.title, r.body, 40)}</div>
-                    </div>
-                    <div className="time">{formatWhen(r.lastReadAt)}</div>
-                  </button>
-                ))
-              )}
-            </div>
-          ) : nav === "tihu" && hubView === "fav" ? (
-            <ArticleFeed
-              articles={filterList(favorites)}
-              profiles={profiles}
-              selectedId={selected?.id}
-              onSelect={openArticle}
-              emptyText="还没有收藏"
-            />
-          ) : nav === "tihu" && hubView === "follow" ? (
-            <ArticleFeed
-              articles={filterList(followArticles)}
-              profiles={profiles}
-              selectedId={selected?.id}
-              onSelect={openArticle}
-              emptyText="留意作者后，这里会出现动态"
-            />
-          ) : nav === "tihu" && hubView === "inbox" ? (
-            <div className="hub-main-list">
-              {notices.length === 0 ? (
-                <div className="empty">暂无评点或回书</div>
-              ) : (
-                notices.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className="hub-row"
-                    onClick={async () => {
-                      if (!n.noteId) return;
-                      try {
-                        const list = await fetchListedArticles();
-                        const a = list.find((x) => x.id === n.noteId);
-                        if (a) {
-                          openArticle(a, {
-                            highlightCommentId: n.commentId || "",
-                          });
-                        } else showToast("文章可能已下架");
-                      } catch (e) {
-                        showToast(e.message || "打开失败");
-                      }
-                    }}
-                  >
-                    <div className="row-top">
-                      <span className="label">
-                        {n.actor?.displayName || "有人"}
-                      </span>
-                      <span className="action">{formatWhen(n.createdAt)}</span>
-                    </div>
-                    <div className="summary">
-                      {n.kind === "follow"
-                        ? "留意了你"
-                        : n.kind === "recommend"
-                          ? "推荐了你的文章"
-                          : n.kind === "reply"
-                            ? "回书了你"
-                            : n.kind === "comment"
-                              ? "评点了你的文章"
-                              : n.body || n.kind}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          ) : nav === "tihu" && hubView === "home" ? (
-            <div className="empty">
-              {narrow ? "请从上方入口进入" : "从左侧选择入口"}
-            </div>
-          ) : nav === "act" && mode === "feed" ? (
-            <div className="empty">选择「新笔记」开始写，或「找 AI」对话</div>
           ) : nav === "explore" ? (
-            <ArticleFeed
-              articles={exploreList}
-              profiles={profiles}
-              selectedId={selected?.id}
-              onSelect={openArticle}
-              emptyText="雅集暂无文章"
-            />
+            renderExploreMain()
           ) : (
             <div className="empty">从左侧选择入口</div>
           )}
@@ -1270,7 +1245,9 @@ export default function AppShell({ initialArticleId = "" }) {
             aria-labelledby="leave-dialog-title"
           >
             <h3 id="leave-dialog-title">内容可能丢失</h3>
-            <p>当前笔记尚未保存，离开可能丢失内容。要保存吗？</p>
+            <p style={{ whiteSpace: "pre-line" }}>
+              {`离开当前${kindNoun(leaveKind)}可能丢失\n是否${kindActionLabel(leaveKind)}？`}
+            </p>
             <div className="leave-dialog-actions">
               <button
                 type="button"
@@ -1294,7 +1271,7 @@ export default function AppShell({ initialArticleId = "" }) {
                   }
                 }}
               >
-                {leaveBusy ? "保存中…" : "保存"}
+                {leaveBusy ? "处理中…" : "是"}
               </button>
               <button
                 type="button"
@@ -1307,7 +1284,7 @@ export default function AppShell({ initialArticleId = "" }) {
                   run();
                 }}
               >
-                不保存
+                否
               </button>
               <button
                 type="button"
@@ -1315,7 +1292,7 @@ export default function AppShell({ initialArticleId = "" }) {
                 disabled={leaveBusy}
                 onClick={() => setLeaveDlg(null)}
               >
-                取消
+                返回
               </button>
             </div>
           </div>
@@ -1337,23 +1314,6 @@ function HubRow({ title, summary, action, onClick, active = false }) {
         <span className="action">{action} ›</span>
       </div>
       <div className="summary">{summary}</div>
-    </button>
-  );
-}
-
-function ArticleListItem({ a, profile, active, onClick }) {
-  return (
-    <button
-      type="button"
-      className={`list-item ${active ? "active" : ""}`}
-      onClick={onClick}
-    >
-      <UserAvatar profile={profile} />
-      <div>
-        <div className="title">{displayTitle(a.title, a.body)}</div>
-        <div className="meta">{excerpt(a.body, 48)}</div>
-      </div>
-      <div className="time">{formatWhen(a.listedAt)}</div>
     </button>
   );
 }

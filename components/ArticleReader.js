@@ -154,20 +154,37 @@ export default function ArticleReader({
     <article className="reader">
       <h1 className="reader-title">{title}</h1>
       <div className="reader-meta">
-        <UserAvatar profile={author} />
-        <div>
-          <div className="name">
-            {author?.displayName || "作者"}
-            {article.city ? (
-              <span className="sub"> · {article.city}</span>
-            ) : null}
+        <button
+          type="button"
+          className="reader-author-hit"
+          onClick={() => onOpenAuthor?.()}
+          disabled={!onOpenAuthor}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            border: 0,
+            background: "transparent",
+            padding: 0,
+            cursor: onOpenAuthor ? "pointer" : "default",
+            textAlign: "left",
+          }}
+        >
+          <UserAvatar profile={author} />
+          <div>
+            <div className="name">
+              {author?.displayName || "作者"}
+              {article.city ? (
+                <span className="sub"> · {article.city}</span>
+              ) : null}
+            </div>
+            <div className="sub">
+              {formatWhen(article.listedAt)}
+              {viewCount != null ? ` · ${viewCount} 阅读` : ""}
+              {` · ${recCount} 推荐 · ${article.commentCount || comments.length} 留言`}
+            </div>
           </div>
-          <div className="sub">
-            {formatWhen(article.listedAt)}
-            {viewCount != null ? ` · ${viewCount} 阅读` : ""}
-            {` · ${recCount} 推荐 · ${article.commentCount || comments.length} 评点`}
-          </div>
-        </div>
+        </button>
         <div style={{ flex: 1 }} />
         {!isMine && article.ownerId ? (
           <button
@@ -187,11 +204,6 @@ export default function ArticleReader({
         {isMine && onEdit ? (
           <button className="btn ghost" onClick={onEdit}>
             编辑
-          </button>
-        ) : null}
-        {onOpenAuthor ? (
-          <button className="btn ghost" onClick={onOpenAuthor}>
-            陋室
           </button>
         ) : null}
       </div>
@@ -246,10 +258,10 @@ export default function ArticleReader({
       </div>
 
       <div className="comments">
-        <h3>评点</h3>
+        <h3>留言</h3>
         {comments.length === 0 ? (
           <div className="empty" style={{ padding: "16px 0" }}>
-            还没有评点
+            还没有留言
           </div>
         ) : (
           comments.map((c) => (
@@ -279,7 +291,7 @@ export default function ArticleReader({
                   <span className="when">{formatWhen(c.createdAt)}</span>
                 </div>
                 <div className="text">
-                  {c.replyToNickname ? `回书 ${c.replyToNickname}：` : ""}
+                  {c.replyToNickname ? `回复 ${c.replyToNickname}：` : ""}
                   {c.body}
                 </div>
                 <button
@@ -294,7 +306,7 @@ export default function ArticleReader({
                   disabled={busy}
                   onClick={() => startReply(c)}
                 >
-                  回书
+                  回复
                 </button>
               </div>
             </div>
@@ -333,7 +345,7 @@ export default function ArticleReader({
               }}
             >
               <span>
-                回书 <strong>{replyTo.authorNickname}</strong>
+                回复 <strong>{replyTo.authorNickname}</strong>
               </span>
               <button
                 type="button"
@@ -351,10 +363,10 @@ export default function ArticleReader({
             onChange={(e) => setCommentText(e.target.value)}
             placeholder={
               !isLoggedIn
-                ? "登录后评点"
+                ? "登录后留言"
                 : replyTo
-                  ? `回书 ${replyTo.authorNickname}…`
-                  : "写一条评点…"
+                  ? `回复 ${replyTo.authorNickname}…`
+                  : "写一条留言…"
             }
             disabled={!isLoggedIn || busy}
           />

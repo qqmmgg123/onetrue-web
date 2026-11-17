@@ -1,24 +1,50 @@
 /** 与 App Material 图标语义对齐的线框图标 */
 
-export function IconTihu({ filled }) {
+export function IconNotes({ filled }) {
   return (
     <svg viewBox="0 0 24 24">
-      {filled ? (
-        <path
-          d="M12 22c1.1 0 2-.9 2-2h-4a2 2 0 0 0 2 2zm6-6V11c0-3.07-1.63-5.64-4.5-6.32V4a1.5 1.5 0 0 0-3 0v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"
-          fill="currentColor"
-          stroke="none"
-        />
-      ) : (
-        <>
-          <path d="M18 16V11a6 6 0 0 0-12 0v5" />
-          <path d="M5 18h14" />
-          <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2z" />
-          <path d="M12 3v1" />
-        </>
-      )}
+      <path d="M4 4h12l4 4v12H4z" fill={filled ? "currentColor" : "none"} />
+      <path d="M16 4v4h4" />
+      <path d="M8 12h8M8 16h6" stroke={filled ? "#fff" : "currentColor"} />
     </svg>
   );
+}
+
+export function IconMemo({ filled }) {
+  return (
+    <svg viewBox="0 0 24 24">
+      <rect
+        x="5"
+        y="3"
+        width="14"
+        height="18"
+        rx="1"
+        fill={filled ? "currentColor" : "none"}
+      />
+      <path d="M8 8h8M8 12h8M8 16h5" stroke={filled ? "#fff" : "currentColor"} />
+    </svg>
+  );
+}
+
+export function IconBook({ filled }) {
+  return (
+    <svg viewBox="0 0 24 24">
+      <path
+        d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 0-2 2V5z"
+        fill={filled ? "currentColor" : "none"}
+      />
+      <path d="M6 3v16" />
+    </svg>
+  );
+}
+
+/** @deprecated 保留兼容；主导航已改为笔记 */
+export function IconTihu({ filled }) {
+  return <IconNotes filled={filled} />;
+}
+
+export function IconExplore({ filled }) {
+  return <IconBook filled={filled} />;
 }
 
 export function IconCalendar({ filled }) {
@@ -32,22 +58,13 @@ export function IconCalendar({ filled }) {
   );
 }
 
-export function IconExplore({ filled }) {
-  return (
-    <svg viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="9" />
-      <path
-        d="m14.5 9.5-1.2 3.8-3.8 1.2 1.2-3.8 3.8-1.2z"
-        fill={filled ? "currentColor" : "none"}
-      />
-    </svg>
-  );
-}
-
 export function IconEdit({ filled }) {
   return (
     <svg viewBox="0 0 24 24">
-      <path d="M4 20h4l10-10-4-4L4 16v4z" fill={filled ? "currentColor" : "none"} />
+      <path
+        d="M4 20h4l10-10-4-4L4 16v4z"
+        fill={filled ? "currentColor" : "none"}
+      />
       <path d="m13 7 4 4" />
     </svg>
   );

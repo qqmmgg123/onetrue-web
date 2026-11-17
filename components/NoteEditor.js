@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { createNote, updateNote } from "../lib/api";
+import { resolveNoteTitleForSave } from "../lib/format";
 import { bodyToStorage, isBodyEmpty, kStoredQuill } from "../lib/quill-body";
 import {
   REMIND_OFFSET_PRESETS,
@@ -36,6 +37,58 @@ function initialOffset(note, kind) {
   return 0;
 }
 
+export function kindNoun(kind) {
+  switch (kind) {
+    case "memo":
+      return "备忘";
+    case "schedule":
+      return "日常";
+    case "article":
+      return "文章";
+    default:
+      return "笔记";
+  }
+}
+
+export function kindActionLabel(kind) {
+  switch (kind) {
+    case "memo":
+      return "添加";
+    case "schedule":
+      return "安排";
+    case "article":
+      return "发布";
+    default:
+      return "保存";
+  }
+}
+
+export function kindHint(kind) {
+  switch (kind) {
+    case "memo":
+      return "将笔记添加到备忘";
+    case "schedule":
+      return "将笔记安排到日常";
+    case "article":
+      return "将笔记发布到阅读";
+    default:
+      return "记录你的念头和思绪";
+  }
+}
+
+function busyLabel(kind) {
+  switch (kind) {
+    case "memo":
+      return "正在添加…";
+    case "schedule":
+      return "正在安排…";
+    case "article":
+      return "正在发布…";
+    default:
+      return "正在保存…";
+  }
+}
+
 const NoteEditor = forwardRef(function NoteEditor(
   {
     note = null,
@@ -52,16 +105,13 @@ const NoteEditor = forwardRef(function NoteEditor(
   const defaultKind =
     note?.kind ||
     initialKind ||
-    (initialScheduleAt ? "schedule" : initialRemindAt ? "memo" : "note");
+    (initialScheduleAt ? "schedule" : "note");
 
   const [title, setTitle] = useState(note?.title || "");
   const [bodyOps, setBodyOps] = useState(null);
   const [bodySeed] = useState(note?.body || "");
   const [bodyFormat] = useState(note?.format || kStoredQuill);
   const [kind, setKind] = useState(defaultKind);
-  const [listIt, setListIt] = useState(
-    note?.listingStatus === "listed" || note?.kind === "article",
-  );
   const [city, setCity] = useState(note?.city || "");
   const [busy, setBusy] = useState(false);
   const quillRef = useRef(null);
@@ -76,16 +126,10 @@ const NoteEditor = forwardRef(function NoteEditor(
 
   const [scheduleLocal, setScheduleLocal] = useState(() =>
     toDatetimeLocalValue(
-      note?.scheduleAt || initialScheduleAt || (defaultKind === "schedule" ? new Date() : null),
+      note?.scheduleAt ||
+        initialScheduleAt ||
+        (defaultKind === "schedule" ? new Date() : null),
     ),
-  );
-  const [memoRemindLocal, setMemoRemindLocal] = useState(() =>
-    toDatetimeLocalValue(
-      note?.remindAt || initialRemindAt || (defaultKind === "memo" ? new Date() : null),
-    ),
-  );
-  const [memoNoRemind, setMemoNoRemind] = useState(
-    defaultKind === "memo" && editing && !note?.remindAt,
   );
   const [remindOffsetMin, setRemindOffsetMin] = useState(() =>
     initialOffset(note, defaultKind),
@@ -112,8 +156,7 @@ const NoteEditor = forwardRef(function NoteEditor(
     () => (note?.recurCount != null ? String(note.recurCount) : "10"),
   );
 
-  const lockedFromCal =
-    !editing && Boolean(initialScheduleAt || initialRemindAt);
+  const lockedFromCal = !editing && Boolean(initialScheduleAt);
   const baselineRef = useRef("");
   const baselineReady = useRef(false);
 
@@ -134,11 +177,8 @@ const NoteEditor = forwardRef(function NoteEditor(
       title: String(title || "").trim(),
       plain: String(plainNow() || "").trim(),
       kind,
-      listIt,
       city: String(city || "").trim(),
       scheduleLocal,
-      memoRemindLocal,
-      memoNoRemind,
       remindOffsetMin,
       recurFreq,
       recurByday,
@@ -170,11 +210,7 @@ const NoteEditor = forwardRef(function NoteEditor(
       schedule_at: scheduleLocal
         ? fromDatetimeLocalValue(scheduleLocal)?.toISOString() || null
         : null,
-      remind_at: memoNoRemind
-        ? ""
-        : memoRemindLocal
-          ? fromDatetimeLocalValue(memoRemindLocal)?.toISOString() || null
-          : null,
+      remind_at: null,
       recur_freq: recurFreq,
       recur_byday: recurByday,
       recur_until:
@@ -184,7 +220,7 @@ const NoteEditor = forwardRef(function NoteEditor(
       recur_count:
         recurEndMode === "count" ? parseInt(recurCount, 10) || null : null,
       remind_offset_min: remindOffsetMin,
-      listed: listIt,
+      listed: kind === "article",
       city,
     };
   }
@@ -246,22 +282,12 @@ const NoteEditor = forwardRef(function NoteEditor(
             const k = String(args.kind).trim();
             if (["note", "memo", "schedule", "article"].includes(k)) {
               setKind(k);
-              if (k === "article") setListIt(true);
             }
           }
           if (args.title != null) setTitle(String(args.title).trim());
           if (args.city != null) setCity(String(args.city).trim());
-          if (args.listed != null) setListIt(Boolean(args.listed));
           if (args.schedule_at) {
             setScheduleLocal(toDatetimeLocalValue(args.schedule_at));
-          }
-          if (args.remind_at !== undefined) {
-            const raw = String(args.remind_at || "").trim();
-            if (!raw) setMemoNoRemind(true);
-            else {
-              setMemoNoRemind(false);
-              setMemoRemindLocal(toDatetimeLocalValue(raw));
-            }
           }
           if (args.recur_freq != null) {
             setRecurFreq(normalizeRecurFreq(args.recur_freq));
@@ -311,19 +337,41 @@ const NoteEditor = forwardRef(function NoteEditor(
           : bodyToStorage([{ insert: "\n" }]);
     if (!String(title).trim() && isBodyEmpty(ops ?? storedBody, kStoredQuill)) {
       if (silentEmpty) return null;
-      toast?.("请填写标题或正文");
+      toast?.(`请填写标题或正文`);
       throw new Error("请填写标题或正文");
+    }
+    if (
+      (kind === "schedule" || kind === "article") &&
+      !String(title).trim()
+    ) {
+      toast?.(kind === "schedule" ? "日常必须填写标题" : "文章必须填写标题");
+      throw new Error("标题必填");
+    }
+    if (kind === "schedule") {
+      const scheduleAt = fromDatetimeLocalValue(scheduleLocal);
+      if (!scheduleAt) {
+        toast?.("请填写日常时间");
+        throw new Error("请填写日常时间");
+      }
     }
 
     setBusy(true);
     try {
-      const payload = {
+      // 与 App 一致：笔记/备忘无标题时用正文首行截取落库
+      const resolvedTitle = resolveNoteTitleForSave({
+        kind,
         title,
+        body: storedBody,
+        format: kStoredQuill,
+      });
+      const payload = {
+        title: resolvedTitle,
         body: storedBody,
         format: kStoredQuill,
         kind,
         city,
-        listingStatus: kind === "article" && listIt ? "listed" : "draft",
+        // 文章发布即可见（不再单独「上架」）
+        listingStatus: kind === "article" ? "listed" : "draft",
       };
 
       if (kind === "schedule") {
@@ -355,20 +403,13 @@ const NoteEditor = forwardRef(function NoteEditor(
         payload.remindAt = remind ? remind.toISOString() : null;
       } else if (kind === "memo") {
         payload.scheduleAt = null;
+        payload.remindAt = null;
+        payload.noRemind = true;
         payload.recurFreq = "";
         payload.recurByday = null;
         payload.recurUntil = null;
         payload.recurCount = null;
         payload.remindOffsetMin = 0;
-        if (memoNoRemind) {
-          payload.remindAt = null;
-          payload.noRemind = true;
-        } else {
-          const remindAt =
-            fromDatetimeLocalValue(memoRemindLocal) ||
-            (initialRemindAt ? new Date(initialRemindAt) : new Date());
-          payload.remindAt = remindAt.toISOString();
-        }
       } else {
         payload.scheduleAt = null;
         payload.remindAt = null;
@@ -379,14 +420,15 @@ const NoteEditor = forwardRef(function NoteEditor(
       const saved = editing
         ? await updateNote(note.id, payload)
         : await createNote(payload);
+      if (resolvedTitle && resolvedTitle !== String(title || "").trim()) {
+        setTitle(resolvedTitle);
+      }
       toast?.(
-        saved?.listingStatus === "listed"
-          ? editing
-            ? "已更新并上架"
-            : "已上架雅集"
-          : editing
-            ? "已更新"
-            : "已保存",
+        editing
+          ? `已${kindActionLabel(kind)}`
+          : kind === "note"
+            ? "已保存"
+            : `已${kindActionLabel(kind)}`,
       );
       baselineRef.current = snapshot();
       baselineReady.current = true;
@@ -396,7 +438,7 @@ const NoteEditor = forwardRef(function NoteEditor(
       }
       return saved;
     } catch (e) {
-      toast?.(e.message || "保存失败");
+      toast?.(e.message || `${kindActionLabel(kind)}失败`);
       throw e;
     } finally {
       setBusy(false);
@@ -405,122 +447,36 @@ const NoteEditor = forwardRef(function NoteEditor(
 
   useImperativeHandle(ref, () => ({
     isDirty,
+    getKind: () => kind,
     /** 离开页面前保存：不触发 onCreated/onSaved 导航，由外壳接手 */
     async save() {
       return handleSave({ skipNavigate: true });
     },
   }));
 
+  const action = kindActionLabel(kind);
+
   return (
     <div className="note-editor-split">
-    <div className="panel note-editor-main">
-      {!lockedFromCal ? (
-        <div className="field">
-          <label>类型</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {[
-              ["note", "随笔"],
-              ["memo", "备忘"],
-              ["schedule", "日程"],
-              ["article", "文章"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={`btn ghost ${kind === id ? "on" : ""}`}
-                onClick={() => {
-                  setKind(id);
-                  if (id === "article") setListIt(true);
-                  if (id === "schedule" && !scheduleLocal) {
-                    setScheduleLocal(toDatetimeLocalValue(new Date()));
-                  }
-                  if (id === "memo" && !memoRemindLocal) {
-                    setMemoRemindLocal(toDatetimeLocalValue(new Date()));
-                  }
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="field">
-        <label>标题</label>
-        <input
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            stopMicOnKeyboard();
-          }}
-          placeholder={kind === "article" ? "文章标题" : "可选"}
-        />
-      </div>
-
-      <div className="field">
-        <label>正文</label>
-        <div className="quill-with-mic">
-          <QuillEditorField
-            ref={quillRef}
-            body={bodySeed}
-            format={bodyFormat}
-            placeholder="写点什么…"
-            onChange={(ops) => {
-              setBodyOps(ops);
-              stopMicOnKeyboard();
-            }}
-          />
-          <div className="quill-mic-fab">
-            <VoiceMicButton
-              ref={micRef}
-              toast={toast}
-              onText={(t) => {
-                voiceInserting.current = true;
-                try {
-                  quillRef.current?.insertText?.(t);
-                } finally {
-                  queueMicrotask(() => {
-                    voiceInserting.current = false;
-                  });
-                }
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {kind === "schedule" ? (
-        <div className="schedule-opts">
+      <div className="panel note-editor-main">
+        {!lockedFromCal ? (
           <div className="field">
-            <label>日程时间</label>
-            <input
-              type="datetime-local"
-              value={scheduleLocal}
-              onChange={(e) => setScheduleLocal(e.target.value)}
-            />
-          </div>
-
-          <div className="field">
-            <label>重复</label>
-            <div className="chip-row">
+            <label>类型</label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {[
-                [kRecurOnce, "一次性"],
-                [kRecurDaily, "每天"],
-                [kRecurWeekly, "每周"],
-                [kRecurMonthly, "每月"],
-                [kRecurYearly, "每年"],
+                ["note", "笔记"],
+                ["memo", "备忘"],
+                ["schedule", "日常"],
+                ["article", "文章"],
               ].map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
-                  className={`chip ${recurFreq === id ? "on" : ""}`}
+                  className={`btn ghost ${kind === id ? "on" : ""}`}
                   onClick={() => {
-                    setRecurFreq(id);
-                    if (id === kRecurOnce) setRecurEndMode("never");
-                    if (id === kRecurWeekly && scheduleLocal) {
-                      const d = fromDatetimeLocalValue(scheduleLocal);
-                      if (d) setRecurByday(weekdayToByDay(d));
+                    setKind(id);
+                    if (id === "schedule" && !scheduleLocal) {
+                      setScheduleLocal(toDatetimeLocalValue(new Date()));
                     }
                   }}
                 >
@@ -528,119 +484,175 @@ const NoteEditor = forwardRef(function NoteEditor(
                 </button>
               ))}
             </div>
+            <p className="field-hint">{kindHint(kind)}</p>
           </div>
+        ) : null}
 
-          {recurFreq === kRecurWeekly ? (
-            <div className="field">
-              <label>每周几</label>
-              <div className="chip-row">
-                {kRecurByDayCodes.map((code, i) => {
-                  const labels = ["一", "二", "三", "四", "五", "六", "日"];
-                  return (
-                    <button
-                      key={code}
-                      type="button"
-                      className={`chip ${recurByday === code ? "on" : ""}`}
-                      onClick={() => setRecurByday(code)}
-                    >
-                      周{labels[i]}
-                    </button>
-                  );
-                })}
-              </div>
+        <div className="field">
+          <label>标题</label>
+          <input
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              stopMicOnKeyboard();
+            }}
+            placeholder={
+              kind === "article" || kind === "schedule" ? "必填" : "可选"
+            }
+          />
+        </div>
+
+        <div className="field">
+          <label>正文</label>
+          <div className="quill-with-mic">
+            <QuillEditorField
+              ref={quillRef}
+              body={bodySeed}
+              format={bodyFormat}
+              placeholder="写点什么…"
+              onChange={(ops) => {
+                setBodyOps(ops);
+                stopMicOnKeyboard();
+              }}
+            />
+            <div className="quill-mic-fab">
+              <VoiceMicButton
+                ref={micRef}
+                toast={toast}
+                onText={(t) => {
+                  voiceInserting.current = true;
+                  try {
+                    quillRef.current?.insertText?.(t);
+                  } finally {
+                    queueMicrotask(() => {
+                      voiceInserting.current = false;
+                    });
+                  }
+                }}
+              />
             </div>
-          ) : null}
+          </div>
+        </div>
 
-          {isRecurringFreq(recurFreq) ? (
+        {kind === "schedule" ? (
+          <div className="schedule-opts">
             <div className="field">
-              <label>结束</label>
-              <div className="chip-row" style={{ marginBottom: 8 }}>
+              <label>日常时间</label>
+              <input
+                type="datetime-local"
+                value={scheduleLocal}
+                onChange={(e) => setScheduleLocal(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label>重复</label>
+              <div className="chip-row">
                 {[
-                  ["never", "永不"],
-                  ["until", "结束日期"],
-                  ["count", "重复次数"],
+                  [kRecurOnce, "一次性"],
+                  [kRecurDaily, "每天"],
+                  [kRecurWeekly, "每周"],
+                  [kRecurMonthly, "每月"],
+                  [kRecurYearly, "每年"],
                 ].map(([id, label]) => (
                   <button
                     key={id}
                     type="button"
-                    className={`chip ${recurEndMode === id ? "on" : ""}`}
-                    onClick={() => setRecurEndMode(id)}
+                    className={`chip ${recurFreq === id ? "on" : ""}`}
+                    onClick={() => {
+                      setRecurFreq(id);
+                      if (id === kRecurOnce) setRecurEndMode("never");
+                      if (id === kRecurWeekly && scheduleLocal) {
+                        const d = fromDatetimeLocalValue(scheduleLocal);
+                        if (d) setRecurByday(weekdayToByDay(d));
+                      }
+                    }}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-              {recurEndMode === "until" ? (
-                <input
-                  type="date"
-                  value={recurUntilLocal}
-                  onChange={(e) => setRecurUntilLocal(e.target.value)}
-                />
-              ) : null}
-              {recurEndMode === "count" ? (
-                <input
-                  type="number"
-                  min={1}
-                  value={recurCount}
-                  onChange={(e) => setRecurCount(e.target.value)}
-                  placeholder="次数"
-                  style={{ maxWidth: 120 }}
-                />
-              ) : null}
             </div>
-          ) : null}
 
-          <div className="field">
-            <label>提醒 · {formatRemindOffset(remindOffsetMin)}</label>
-            <div className="chip-row">
-              {REMIND_OFFSET_PRESETS.map((p) => (
-                <button
-                  key={p.value}
-                  type="button"
-                  className={`chip ${remindOffsetMin === p.value ? "on" : ""}`}
-                  onClick={() => setRemindOffsetMin(p.value)}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {kind === "memo" ? (
-        <div className="schedule-opts">
-          <div className="field">
-            <label>提醒时间</label>
-            <div className="chip-row" style={{ marginBottom: 8 }}>
-              <button
-                type="button"
-                className={`chip ${!memoNoRemind ? "on" : ""}`}
-                onClick={() => setMemoNoRemind(false)}
-              >
-                提醒
-              </button>
-              <button
-                type="button"
-                className={`chip ${memoNoRemind ? "on" : ""}`}
-                onClick={() => setMemoNoRemind(true)}
-              >
-                不提醒
-              </button>
-            </div>
-            {!memoNoRemind ? (
-              <input
-                type="datetime-local"
-                value={memoRemindLocal}
-                onChange={(e) => setMemoRemindLocal(e.target.value)}
-              />
+            {recurFreq === kRecurWeekly ? (
+              <div className="field">
+                <label>每周几</label>
+                <div className="chip-row">
+                  {kRecurByDayCodes.map((code, i) => {
+                    const labels = ["一", "二", "三", "四", "五", "六", "日"];
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        className={`chip ${recurByday === code ? "on" : ""}`}
+                        onClick={() => setRecurByday(code)}
+                      >
+                        周{labels[i]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ) : null}
-          </div>
-        </div>
-      ) : null}
 
-      {kind === "article" ? (
-        <>
+            {isRecurringFreq(recurFreq) ? (
+              <div className="field">
+                <label>结束</label>
+                <div className="chip-row" style={{ marginBottom: 8 }}>
+                  {[
+                    ["never", "永不"],
+                    ["until", "结束日期"],
+                    ["count", "重复次数"],
+                  ].map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`chip ${recurEndMode === id ? "on" : ""}`}
+                      onClick={() => setRecurEndMode(id)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {recurEndMode === "until" ? (
+                  <input
+                    type="date"
+                    value={recurUntilLocal}
+                    onChange={(e) => setRecurUntilLocal(e.target.value)}
+                  />
+                ) : null}
+                {recurEndMode === "count" ? (
+                  <input
+                    type="number"
+                    min={1}
+                    value={recurCount}
+                    onChange={(e) => setRecurCount(e.target.value)}
+                    placeholder="次数"
+                    style={{ maxWidth: 120 }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="field">
+              <label>提醒 · {formatRemindOffset(remindOffsetMin)}</label>
+              <div className="chip-row">
+                {REMIND_OFFSET_PRESETS.map((p) => (
+                  <button
+                    key={p.value}
+                    type="button"
+                    className={`chip ${remindOffsetMin === p.value ? "on" : ""}`}
+                    onClick={() => setRemindOffsetMin(p.value)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {kind === "article" ? (
           <div className="field">
             <label>城市（可选）</label>
             <input
@@ -649,36 +661,19 @@ const NoteEditor = forwardRef(function NoteEditor(
               placeholder="如：上海"
             />
           </div>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 16,
-              fontSize: 13,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={listIt}
-              onChange={(e) => setListIt(e.target.checked)}
-            />
-            上架到雅集
-          </label>
-        </>
-      ) : null}
+        ) : null}
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          className="btn"
-          type="button"
-          disabled={busy}
-          onClick={() => handleSave().catch(() => {})}
-        >
-          {busy ? "保存中…" : editing ? "更新" : "保存"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={() => handleSave().catch(() => {})}
+          >
+            {busy ? busyLabel(kind) : action}
+          </button>
+        </div>
       </div>
-    </div>
 
       <aside className="note-editor-aside">
         <NoteAiPanel

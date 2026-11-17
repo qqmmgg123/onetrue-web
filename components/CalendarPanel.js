@@ -5,10 +5,10 @@
  * - 时段网格 06–23，每行一小时
  * - 点空白 → 该时刻新建日程；长按/右键 → 新建备忘
  * - 事件按 hour+minute 绝对定位，固定约 1 小时高
- * Web 用周历（7 列），交互与三日历相同。
+ * Web 用周历（7 列）；月历入口已隐藏。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { displayTitle, formatWhen } from "../lib/format";
 import { expandOccurrences } from "../lib/note-recur";
 
@@ -54,7 +54,7 @@ function slotAt(day, hour) {
   return new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, 0, 0);
 }
 
-/** 日程展开重复实例；备忘用 remindAt（与 App notesGroupedByDay 一致） */
+/** 仅日程展开重复实例（日常页不再展示备忘） */
 function notesByDay(notes, from, to) {
   const map = {};
   const windowFrom =
@@ -68,15 +68,6 @@ function notesByDay(notes, from, to) {
         if (!map[k]) map[k] = [];
         map[k].push({ note: n, at });
       }
-      continue;
-    }
-    if (n.kind === "memo" && n.remindAt) {
-      const at = new Date(n.remindAt);
-      if (Number.isNaN(at.getTime())) continue;
-      if (at < windowFrom || at > windowTo) continue;
-      const k = dateKey(at);
-      if (!map[k]) map[k] = [];
-      map[k].push({ note: n, at });
     }
   }
   for (const k of Object.keys(map)) {
@@ -242,63 +233,25 @@ function WeekTimeline({
 
 export default function CalendarPanel({
   notes = [],
-  view: viewProp = "week",
-  onViewChange,
   onOpenNote,
   onCreateSchedule,
-  onCreateMemo,
 }) {
   const today = useMemo(() => dateOnly(new Date()), []);
-  const [viewInner, setViewInner] = useState(viewProp);
-  const view = viewProp || viewInner;
-  const setView = (v) => {
-    setViewInner(v);
-    onViewChange?.(v);
-  };
-  useEffect(() => {
-    if (viewProp) setViewInner(viewProp);
-  }, [viewProp]);
-  const [month, setMonth] = useState(() => startOfMonth(today));
+  // 月历尚未完善：固定周历
   const [weekStart, setWeekStart] = useState(() => startOfWeek(today));
   const [selected, setSelected] = useState(() => today);
 
   const byDay = useMemo(() => {
-    // 覆盖当前月/周前后各约 2 个月，足够展开重复日程
-    const anchor = view === "week" ? weekStart : month;
-    const from = addMonths(startOfMonth(anchor), -2);
-    const to = addMonths(startOfMonth(anchor), 4);
+    const from = addMonths(startOfMonth(weekStart), -2);
+    const to = addMonths(startOfMonth(weekStart), 4);
     to.setHours(23, 59, 59, 999);
     return notesByDay(notes, from, to);
-  }, [notes, view, weekStart, month]);
+  }, [notes, weekStart]);
 
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
     [weekStart],
   );
-
-  const monthCells = useMemo(() => {
-    const first = startOfMonth(month);
-    const startPad = (first.getDay() + 6) % 7;
-    const daysInMonth = new Date(
-      month.getFullYear(),
-      month.getMonth() + 1,
-      0,
-    ).getDate();
-    const list = [];
-    for (let i = 0; i < startPad; i++) {
-      list.push({ date: addDays(first, -(startPad - i)), muted: true });
-    }
-    for (let d = 1; d <= daysInMonth; d++) {
-      list.push({
-        date: new Date(month.getFullYear(), month.getMonth(), d),
-        muted: false,
-      });
-    }
-    while (list.length % 7 !== 0) {
-      list.push({ date: addDays(list[list.length - 1].date, 1), muted: true });
-    }
-    return list;
-  }, [month]);
 
   const selectedKey = dateKey(selected);
   const dayNotes = byDay[selectedKey] || [];
@@ -315,9 +268,9 @@ export default function CalendarPanel({
   const onLongPressSlot = useCallback(
     (at) => {
       setSelected(dateOnly(at));
-      onCreateMemo?.(at);
+      onCreateSchedule?.(at);
     },
-    [onCreateMemo],
+    [onCreateSchedule],
   );
 
   return (
@@ -327,96 +280,43 @@ export default function CalendarPanel({
           type="button"
           className="btn ghost"
           onClick={() => {
-            if (view === "week") {
-              const next = addDays(weekStart, -7);
-              setWeekStart(next);
-              setSelected(next);
-            } else setMonth((m) => addMonths(m, -1));
+            const next = addDays(weekStart, -7);
+            setWeekStart(next);
+            setSelected(next);
           }}
         >
-          {view === "week" ? "上周" : "上月"}
+          上周
         </button>
         <div style={{ textAlign: "center" }}>
           <strong>
-            {view === "week"
-              ? `${weekStart.getFullYear()} · ${weekLabel}`
-              : `${month.getFullYear()}年${month.getMonth() + 1}月`}
+            {weekStart.getFullYear()} · {weekLabel}
           </strong>
         </div>
         <button
           type="button"
           className="btn ghost"
           onClick={() => {
-            if (view === "week") {
-              const next = addDays(weekStart, 7);
-              setWeekStart(next);
-              setSelected(next);
-            } else setMonth((m) => addMonths(m, 1));
+            const next = addDays(weekStart, 7);
+            setWeekStart(next);
+            setSelected(next);
           }}
         >
-          {view === "week" ? "下周" : "下月"}
+          下周
         </button>
       </div>
 
-      <p className="cal-hint">
-        {view === "week"
-          ? "左右换周；点空白时段新建日程，右键或长按建备忘（与 App 三日历相同）。"
-          : "点日期查看当天；切到周历可按小时段添加。"}
-      </p>
+      <p className="cal-hint">左右换周；点空白时段安排日常。</p>
 
-      {view === "week" ? (
-        <WeekTimeline
-          days={weekDays}
-          selected={selected}
-          today={today}
-          byDay={byDay}
-          onSelectDay={setSelected}
-          onTapSlot={onTapSlot}
-          onLongPressSlot={onLongPressSlot}
-          onTapNote={onOpenNote}
-        />
-      ) : (
-        <>
-          <div className="cal-grid" style={{ marginBottom: 0 }}>
-            {WD.map((w) => (
-              <div
-                key={w}
-                style={{
-                  textAlign: "center",
-                  fontSize: 12,
-                  color: "#888",
-                  padding: "4px 0",
-                }}
-              >
-                {w}
-              </div>
-            ))}
-          </div>
-          <div className="cal-grid">
-            {monthCells.map(({ date, muted }) => {
-              const k = dateKey(date);
-              const isToday = k === dateKey(today);
-              const isSel = k === selectedKey;
-              const has = Boolean(byDay[k]?.length);
-              return (
-                <button
-                  key={k + (muted ? "m" : "")}
-                  type="button"
-                  className={`cal-cell ${muted ? "muted" : ""} ${isToday ? "today" : ""} ${isSel ? "selected" : ""}`}
-                  onClick={() => {
-                    setSelected(date);
-                    setWeekStart(startOfWeek(date));
-                    setView("week");
-                  }}
-                >
-                  {date.getDate()}
-                  {has ? <span className="dot" /> : null}
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
+      <WeekTimeline
+        days={weekDays}
+        selected={selected}
+        today={today}
+        byDay={byDay}
+        onSelectDay={setSelected}
+        onTapSlot={onTapSlot}
+        onLongPressSlot={onLongPressSlot}
+        onTapNote={onOpenNote}
+      />
 
       <div style={{ padding: "8px 16px 24px" }}>
         <div
@@ -430,28 +330,21 @@ export default function CalendarPanel({
           }}
         >
           <strong>
-            {selected.getMonth() + 1}月{selected.getDate()}日 · 当天备忘/日程
+            {selected.getMonth() + 1}月{selected.getDate()}日 · 当天日常
           </strong>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
               className="btn ghost"
-              onClick={() => onCreateMemo?.(slotAt(selected, 9))}
-            >
-              新建备忘
-            </button>
-            <button
-              type="button"
-              className="btn ghost"
               onClick={() => onCreateSchedule?.(slotAt(selected, 9))}
             >
-              新建日程
+              安排日常
             </button>
           </div>
         </div>
         {dayNotes.length === 0 ? (
           <div className="empty" style={{ padding: "16px 0" }}>
-            这一天暂无备忘或日程
+            这一天暂无日常
           </div>
         ) : (
           dayNotes.map(({ note, at }) => (
@@ -464,9 +357,7 @@ export default function CalendarPanel({
             >
               <div>
                 <div className="title">{displayTitle(note.title, note.body)}</div>
-                <div className="meta">
-                  {note.kind === "schedule" ? "日程" : "备忘"} · {formatWhen(at)}
-                </div>
+                <div className="meta">日常 · {formatWhen(at)}</div>
               </div>
             </button>
           ))

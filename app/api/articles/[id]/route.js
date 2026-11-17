@@ -25,7 +25,7 @@ export async function GET(request, { params }) {
   try {
     const article = await fetchArticleByIdServer(id, readAccessToken(request));
     if (!article) {
-      return NextResponse.json({ error: "未找到或未上架" }, { status: 404 });
+      return NextResponse.json({ error: "未找到文章" }, { status: 404 });
     }
     return NextResponse.json({ article });
   } catch (e) {

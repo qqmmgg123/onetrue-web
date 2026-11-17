@@ -26,7 +26,7 @@ export async function GET(request) {
   const ids = (follows || []).map((r) => r.following_id).filter(Boolean);
   if (!ids.length) return NextResponse.json({ articles: [] });
   const rows = await restGet(
-    `/notes?select=${encodeURIComponent(ARTICLE_SELECT)}&deleted_at=is.null&kind=eq.article&listing_status=eq.listed&owner_id=in.(${ids.join(",")})&order=listed_at.desc&limit=100`,
+    `/notes?select=${encodeURIComponent(ARTICLE_SELECT)}&deleted_at=is.null&kind=eq.article&owner_id=in.(${ids.join(",")})&order=listed_at.desc.nullslast&limit=100`,
     { accessToken: token },
   );
   return NextResponse.json({

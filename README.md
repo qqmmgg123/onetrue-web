@@ -47,7 +47,32 @@ SHARE_WEB_BASE=http://otrue.top
 
 ## Web 能力
 
-- 求索 / 关注 / 醍醐 / 找 AI / 我的
-- **写笔记**（可上架市集）
+- 笔记 / 备忘 / 日常 / 阅读 / 其他
+- **写笔记**、备忘卡片、周历日常
 - **上传头像**（七牛，需配 QINIU_*）
-- AI 经 `/api/ai/chat`（不再依赖浏览器里的 NEXT_PUBLIC_SUPABASE_*）
+- AI 经 `/api/ai/chat`（入口可隐藏；API 仍保留）
+
+## SEO 与路由
+
+- 公开文章：`/a/[id]`（ISR，约 120s；含 `generateMetadata` + JSON-LD + 爬虫可读正文）
+- 壳内点开文章会 `history.pushState` 同步到 `/a/id`，支持前进/后退
+- `sitemap.xml` / `robots.txt` 由 App Router 生成
+- 笔记/备忘/日常等登录操作台仍走客户端状态，不强制 SEO
+
+## EdgeOne 部署（是否适合 SSR）
+
+你们已有 `/api/*` Node 路由，**不要**用 `output: 'export'` 纯静态。
+
+推荐 **EdgeOne Makers / 全栈 Next.js**：
+
+| 项 | 值 |
+| --- | --- |
+| 构建命令 | `npm run build`（或 `pnpm build`） |
+| 输出目录 | `.next`（不是 `out`） |
+| Next | 14.2.x（当前） |
+| 环境变量 | `SUPABASE_*`、`NEXT_PUBLIC_SITE_URL=https://你的域名` 等 |
+
+- **经典 Pages 仅静态导出**：不适合本仓库（API + 文章 SSR 都需要 Node）。
+- **Makers 全栈**：支持 SSR / ISR / Route Handlers，适合当前方案。
+
+部署后抽查：`/a/<某文章id>` 查看源代码应有标题与 JSON-LD；`/sitemap.xml` 可访问。

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { readAccessToken } from "../../../lib/server/session";
 import { authGetUser, hasServerSupabase } from "../../../lib/server/supabase";
 import { restGet, restPost } from "../../../lib/server/rest";
+import { resolveNoteTitleForSave } from "../../../lib/format";
 import {
   NOTE_SELECT,
   mapNote,
@@ -25,13 +26,36 @@ export async function GET(request) {
     return NextResponse.json({ error: "登录失效" }, { status: 401 });
   }
   try {
-    const rows = await restGet(
-      `/notes?select=${NOTE_SELECT}&owner_id=eq.${user.id}&deleted_at=is.null&order=updated_at.desc&limit=200`,
-      { accessToken: token },
-    );
-    return NextResponse.json({ notes: (rows || []).map(mapNote) });
+    const url = new URL(request.url);
+    const limitRaw = Number(url.searchParams.get("limit") || 40);
+    const offsetRaw = Number(url.searchParams.get("offset") || 0);
+    const kind = String(url.searchParams.get("kind") || "").trim();
+    const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 40));
+    const offset = Math.max(0, Number.isFinite(offsetRaw) ? offsetRaw : 0);
+    const params = [
+      `select=${NOTE_SELECT}`,
+      `owner_id=eq.${user.id}`,
+      "deleted_at=is.null",
+      "order=updated_at.desc",
+      `limit=${limit}`,
+      `offset=${offset}`,
+    ];
+    if (kind) params.push(`kind=eq.${encodeURIComponent(kind)}`);
+    const rows = await restGet(`/notes?${params.join("&")}`, {
+      accessToken: token,
+    });
+    const notes = (rows || []).map(mapNote);
+    return NextResponse.json({
+      notes,
+      limit,
+      offset,
+      hasMore: notes.length >= limit,
+    });
   } catch (e) {
-    return NextResponse.json({ error: e.message, notes: [] }, { status: 502 });
+    return NextResponse.json(
+      { error: e.message, notes: [], hasMore: false },
+      { status: 502 },
+    );
   }
 }
 
@@ -56,8 +80,14 @@ export async function POST(request) {
   }
 
   const kind = String(body.kind || "note").trim() || "note";
-  const title = String(body.title || "").trim();
   const text = String(body.body || "");
+  const format = String(body.format || "quill");
+  const title = resolveNoteTitleForSave({
+    kind,
+    title: body.title,
+    body: text,
+    format,
+  });
   const listingStatus =
     body.listingStatus === "listed" || body.list === true
       ? "listed"
@@ -72,6 +102,12 @@ export async function POST(request) {
 
   if (!text.trim() && !title) {
     return NextResponse.json({ error: "请填写标题或正文" }, { status: 400 });
+  }
+  if ((kind === "schedule" || kind === "article") && !String(body.title || "").trim()) {
+    return NextResponse.json(
+      { error: kind === "schedule" ? "日常必须填写标题" : "文章必须填写标题" },
+      { status: 400 },
+    );
   }
 
   const recur = recurFieldsFromBody(body, { kind });
@@ -99,17 +135,9 @@ export async function POST(request) {
     id,
     owner_id: user.id,
     kind,
-    title:
-      title ||
-      (kind === "article"
-        ? "无标题文章"
-        : kind === "memo"
-          ? "备忘"
-          : kind === "schedule"
-            ? "日程"
-            : "随笔"),
+    title,
     body: text,
-    format: body.format || "quill",
+    format,
     listing_status: kind === "article" ? listingStatus : "draft",
     city,
     updated_at: now,

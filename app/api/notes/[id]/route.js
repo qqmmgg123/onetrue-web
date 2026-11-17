@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readAccessToken } from "../../../../lib/server/session";
 import { authGetUser, hasServerSupabase } from "../../../../lib/server/supabase";
 import { restGet, restPatch, restPost } from "../../../../lib/server/rest";
+import { resolveNoteTitleForSave } from "../../../../lib/format";
 import {
   NOTE_SELECT,
   mapNote,
@@ -56,13 +57,37 @@ export async function PATCH(request, { params }) {
     const now = new Date().toISOString();
     const patch = { updated_at: now };
 
-    if (body.title != null) patch.title = String(body.title).trim();
     if (body.body != null) patch.body = String(body.body);
     if (body.format != null) patch.format = String(body.format);
     if (body.kind != null) patch.kind = String(body.kind).trim() || cur.kind;
     if (body.city != null) patch.city = String(body.city).trim();
 
     const nextKind = patch.kind || cur.kind;
+    const nextBody = patch.body != null ? patch.body : cur.body;
+    const nextFormat = patch.format || cur.format || "quill";
+    // 与 App 一致：笔记/备忘空标题用正文截取
+    if (body.title != null || body.body != null || body.kind != null) {
+      const rawTitle =
+        body.title != null ? body.title : cur.title || "";
+      if (
+        (nextKind === "schedule" || nextKind === "article") &&
+        !String(rawTitle || "").trim()
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              nextKind === "schedule" ? "日常必须填写标题" : "文章必须填写标题",
+          },
+          { status: 400 },
+        );
+      }
+      patch.title = resolveNoteTitleForSave({
+        kind: nextKind,
+        title: rawTitle,
+        body: nextBody,
+        format: nextFormat,
+      });
+    }
 
     if (body.scheduleAt !== undefined) {
       patch.schedule_at = body.scheduleAt
@@ -224,6 +249,32 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "笔记不存在" }, { status: 404 });
     }
     return NextResponse.json({ note: mapNote(row) });
+  } catch (e) {
+    return NextResponse.json({ error: e.message }, { status: 502 });
+  }
+}
+
+/** 软删除 */
+export async function DELETE(request, { params }) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+  const { token, user } = auth;
+  const id = String(params?.id || "").trim();
+  if (!id) {
+    return NextResponse.json({ error: "缺少 id" }, { status: 400 });
+  }
+  try {
+    const now = new Date().toISOString();
+    const rows = await restPatch(
+      `/notes?id=eq.${encodeURIComponent(id)}&owner_id=eq.${user.id}&deleted_at=is.null`,
+      { deleted_at: now, updated_at: now },
+      { accessToken: token },
+    );
+    const saved = Array.isArray(rows) ? rows[0] : rows;
+    if (!saved) {
+      return NextResponse.json({ error: "笔记不存在" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true, note: mapNote(saved) });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 502 });
   }
