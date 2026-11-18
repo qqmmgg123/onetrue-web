@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  deleteNote,
   fetchListedArticles,
   fetchFollowingArticles,
   fetchMyFavorites,
@@ -80,6 +81,7 @@ export default function AppShell({
   const [notesHasMore, setNotesHasMore] = useState(false);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesLoadingMore, setNotesLoadingMore] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState("");
   const notesOffsetRef = useRef(0);
   const notesBusyRef = useRef(false);
   const notesHasMoreRef = useRef(false);
@@ -437,6 +439,26 @@ export default function AppShell({
     setComposeRemindAt(null);
     setComposeKind(null);
     setComposeNote(null);
+  }
+
+  async function confirmDeleteNote(n) {
+    if (!n?.id || deletingNoteId) return;
+    const title = displayTitle(n.title, n.body, "笔记", n.format);
+    if (!window.confirm(`确认删除「${title}」？`)) return;
+    setDeletingNoteId(n.id);
+    try {
+      await deleteNote(n.id);
+      showToast("已删除");
+      if (composeNote?.id === n.id) {
+        clearCompose();
+        setMode("feed");
+      }
+      await refreshHub().catch(() => {});
+    } catch (e) {
+      showToast(e.message || "删除失败");
+    } finally {
+      setDeletingNoteId("");
+    }
   }
 
   function leaveComposeThen(run) {
@@ -916,6 +938,8 @@ export default function AppShell({
                       action="打开"
                       active={mode === "compose" && composeNote?.id === n.id}
                       onClick={() => openCompose(n)}
+                      deleting={deletingNoteId === n.id}
+                      onDelete={() => confirmDeleteNote(n)}
                     />
                   ))}
                   {noteList.length === 0 ? (
@@ -1021,6 +1045,23 @@ export default function AppShell({
             <h2>{mainTitle}</h2>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {mode === "compose" &&
+            (composeKind ||
+              composeNote?.kind ||
+              (nav === "notes" ? "note" : "")) !== "note" ? (
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  leaveComposeThen(() => {
+                    clearCompose();
+                    setMode("feed");
+                  });
+                }}
+              >
+                返回
+              </button>
+            ) : null}
             {mode === "reader" || mode === "author" ? (
               <button
                 type="button"
@@ -1120,6 +1161,19 @@ export default function AppShell({
                 await refreshExplore().catch(() => {});
                 await refreshMine().catch(() => {});
                 afterNoteSaved(note);
+              }}
+              onDeleted={async (note) => {
+                clearCompose();
+                if (note?.kind === "memo") setNav("memo");
+                else if (note?.kind === "schedule") setNav("calendar");
+                else if (note?.kind === "article") {
+                  setNav("explore");
+                  setExploreTab("mine");
+                } else setNav("notes");
+                setMode("feed");
+                await refreshHub().catch(() => {});
+                await refreshExplore().catch(() => {});
+                await refreshMine().catch(() => {});
               }}
             />
           ) : mode === "auth" ? (
@@ -1302,18 +1356,40 @@ export default function AppShell({
   );
 }
 
-function HubRow({ title, summary, action, onClick, active = false }) {
+function HubRow({
+  title,
+  summary,
+  action,
+  onClick,
+  active = false,
+  onDelete,
+  deleting = false,
+}) {
   return (
-    <button
-      type="button"
-      className={`hub-row${active ? " active" : ""}`}
-      onClick={onClick}
-    >
-      <div className="row-top">
-        <span className="label">{title}</span>
-        <span className="action">{action} ›</span>
-      </div>
-      <div className="summary">{summary}</div>
-    </button>
+    <div className={`hub-row${active ? " active" : ""}`}>
+      <button type="button" className="hub-row-main" onClick={onClick}>
+        <div className="row-top">
+          <span className="label">{title}</span>
+          <span className="action">{action} ›</span>
+        </div>
+        {summary != null && summary !== "" ? (
+          <div className="summary">{summary}</div>
+        ) : null}
+      </button>
+      {onDelete ? (
+        <button
+          type="button"
+          className="hub-row-delete"
+          disabled={deleting}
+          title="删除"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          删除
+        </button>
+      ) : null}
+    </div>
   );
 }

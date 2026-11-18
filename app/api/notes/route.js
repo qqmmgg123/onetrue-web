@@ -32,11 +32,15 @@ export async function GET(request) {
     const kind = String(url.searchParams.get("kind") || "").trim();
     const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 40));
     const offset = Math.max(0, Number.isFinite(offsetRaw) ? offsetRaw : 0);
+    const order =
+      kind === "memo"
+        ? "order=sort_order.asc,updated_at.desc"
+        : "order=updated_at.desc";
     const params = [
       `select=${NOTE_SELECT}`,
       `owner_id=eq.${user.id}`,
       "deleted_at=is.null",
-      "order=updated_at.desc",
+      order,
       `limit=${limit}`,
       `offset=${offset}`,
     ];
@@ -131,6 +135,11 @@ export async function POST(request) {
     remindAt = null;
   }
 
+  const sortOrderRaw = body.sortOrder ?? body.sort_order;
+  const sortOrder = Number.isFinite(Number(sortOrderRaw))
+    ? Math.trunc(Number(sortOrderRaw))
+    : 0;
+
   const row = {
     id,
     owner_id: user.id,
@@ -145,6 +154,7 @@ export async function POST(request) {
       kind === "article" && listingStatus === "listed" ? now : null,
     schedule_at: scheduleAt,
     remind_at: remindAt,
+    sort_order: sortOrder,
     ...recur,
     deleted_at: null,
   };

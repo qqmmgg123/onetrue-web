@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { createNote, updateNote } from "../lib/api";
+import { createNote, deleteNote, updateNote } from "../lib/api";
 import { resolveNoteTitleForSave } from "../lib/format";
 import { bodyToStorage, isBodyEmpty, kStoredQuill } from "../lib/quill-body";
 import {
@@ -94,6 +94,7 @@ const NoteEditor = forwardRef(function NoteEditor(
     note = null,
     onCreated,
     onSaved,
+    onDeleted,
     toast,
     initialScheduleAt = null,
     initialRemindAt = null,
@@ -321,6 +322,23 @@ const NoteEditor = forwardRef(function NoteEditor(
     return tips;
   }
 
+  async function handleDelete() {
+    if (!editing || !note?.id || busy) return;
+    const label = kindNoun(kind);
+    const name = (title || "").trim() || label;
+    if (!window.confirm(`确认删除「${name}」？`)) return;
+    setBusy(true);
+    try {
+      await deleteNote(note.id);
+      toast?.("已删除");
+      onDeleted?.(note);
+    } catch (e) {
+      toast?.(e.message || "删除失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleSave({ silentEmpty = false, skipNavigate = false } = {}) {
     const ops = bodyOps ?? quillRef.current?.getOps?.() ?? null;
     const storedBody =
@@ -373,6 +391,10 @@ const NoteEditor = forwardRef(function NoteEditor(
         // 文章发布即可见（不再单独「上架」）
         listingStatus: kind === "article" ? "listed" : "draft",
       };
+      // 新备忘插到最前
+      if (!editing && kind === "memo") {
+        payload.sortOrder = -Date.now();
+      }
 
       if (kind === "schedule") {
         const scheduleAt =
@@ -663,7 +685,7 @@ const NoteEditor = forwardRef(function NoteEditor(
           </div>
         ) : null}
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             className="btn"
             type="button"
@@ -672,6 +694,16 @@ const NoteEditor = forwardRef(function NoteEditor(
           >
             {busy ? busyLabel(kind) : action}
           </button>
+          {editing ? (
+            <button
+              className="btn ghost"
+              type="button"
+              disabled={busy}
+              onClick={() => handleDelete()}
+            >
+              删除
+            </button>
+          ) : null}
         </div>
       </div>
 

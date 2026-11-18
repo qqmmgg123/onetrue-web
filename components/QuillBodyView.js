@@ -45,6 +45,7 @@ export default function QuillBodyView({
   }, [body, format, plain]);
 
   if (!plain.trim()) {
+    if (!emptyText) return null;
     return <p className={`sub ${className}`.trim()}>{emptyText}</p>;
   }
 

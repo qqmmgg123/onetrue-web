@@ -61,6 +61,10 @@ export async function PATCH(request, { params }) {
     if (body.format != null) patch.format = String(body.format);
     if (body.kind != null) patch.kind = String(body.kind).trim() || cur.kind;
     if (body.city != null) patch.city = String(body.city).trim();
+    if (body.sortOrder != null || body.sort_order != null) {
+      const so = Number(body.sortOrder ?? body.sort_order);
+      if (Number.isFinite(so)) patch.sort_order = Math.trunc(so);
+    }
 
     const nextKind = patch.kind || cur.kind;
     const nextBody = patch.body != null ? patch.body : cur.body;

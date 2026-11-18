@@ -268,11 +268,14 @@ button {
 }
 
 .hub-row {
-  display: block;
+  display: flex;
+  align-items: stretch;
   width: 100%;
-  padding: 14px 16px;
+  padding: 0;
+  border: 0;
   border-bottom: 1px solid var(--line);
   text-align: left;
+  background: transparent;
   transition: background 0.12s;
 }
 
@@ -282,6 +285,50 @@ button {
 
 .hub-row.active {
   background: var(--active);
+}
+
+/* 旧式整行 button.hub-row（如留言列表）仍保留内边距 */
+button.hub-row {
+  display: block;
+  padding: 14px 16px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.hub-row-main {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.hub-row-delete {
+  flex-shrink: 0;
+  align-self: center;
+  margin-right: 10px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hub-row-delete:hover:not(:disabled) {
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.hub-row-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .hub-row .row-top {
@@ -1282,42 +1329,57 @@ button {
 }
 
 .memo-grid-wrap {
-  padding: 12px 12px 32px;
+  padding: 12px 16px 32px;
+}
+
+.memo-sort-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .memo-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-@media (max-width: 960px) {
-  .memo-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  /* Web 大屏更大卡片：约 220px 宽、黄金比更高 */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
 }
 
 @media (max-width: 560px) {
   .memo-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
   }
 }
 
 .memo-card {
   position: relative;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  min-height: 140px;
+  aspect-ratio: 1 / 1.618;
+  background: #fff;
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  cursor: grab;
+}
+
+.memo-card.dragging {
+  opacity: 0.55;
+  cursor: grabbing;
 }
 
 .memo-card-add {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 140px;
   color: var(--muted);
+  cursor: pointer;
+  border: 1px dashed var(--line);
+  box-shadow: none;
+  background: #fafafa;
 }
 
 .memo-card-add:hover {
@@ -1326,14 +1388,14 @@ button {
 }
 
 .memo-card-add-label {
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .memo-card-actions {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  z-index: 1;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
   display: flex;
   gap: 0;
 }
@@ -1341,32 +1403,82 @@ button {
 .memo-card-actions .btn {
   font-size: 12px;
   padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .memo-card-body {
-  display: block;
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  flex: 1;
+  height: 100%;
+  min-height: 0;
   text-align: left;
-  padding: 36px 12px 12px;
-}
-
-.memo-card-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
+  padding: 36px 14px 14px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  position: relative;
   overflow: hidden;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 14px;
-  line-height: 1.45;
-  min-height: 5.8em;
 }
 
-.memo-card-meta {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--muted);
+.memo-card-title {
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-bottom: 10px;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.memo-card-rich {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.memo-card-quill.quill-body-view,
+.memo-card-rich .quill-host-ro {
+  height: 100%;
+  overflow: hidden;
+}
+
+.memo-card-rich .ql-editor {
+  font-size: 15px !important;
+  line-height: 1.5 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.memo-card-fade {
+  pointer-events: none;
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  height: 32px;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.92) 55%,
+    #fff
+  );
+}
+
+.memo-card-fade::after {
+  content: "…";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #666;
+  line-height: 1;
+  text-shadow: 0 0 6px #fff;
 }
 
 .memo-detail {
@@ -1384,8 +1496,9 @@ button {
 
 .memo-detail-title {
   margin: 0 0 8px;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .memo-detail-meta {
@@ -1395,8 +1508,13 @@ button {
 }
 
 .memo-detail-body {
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.memo-detail-body .quill-body-view .ql-editor {
+  font-size: 16px;
+  line-height: 1.75;
 }
 
 .auth-tabs {
