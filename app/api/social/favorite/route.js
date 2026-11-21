@@ -25,17 +25,52 @@ export async function GET(request) {
   );
   const ids = (favs || []).map((r) => r.note_id).filter(Boolean);
   if (!ids.length) return NextResponse.json({ articles: [] });
+  // 删文/改类型后收藏记录仍保留；点开再提示已删除或已下架。
+  const favSelect = `${ARTICLE_SELECT},kind`;
   const rows = await restGet(
-    `/notes?select=${encodeURIComponent(ARTICLE_SELECT)}&id=in.(${ids.join(",")})&deleted_at=is.null`,
+    `/notes?select=${encodeURIComponent(favSelect)}&id=in.(${ids.join(",")})&deleted_at=is.null`,
     { accessToken: token },
   );
   const byId = {};
   for (const r of rows || []) {
+    const id = String(r?.id || "");
+    if (!id) continue;
+    if (String(r.kind || "") !== "article") {
+      byId[id] = {
+        id,
+        title: String(r.title || "").trim() || "已下架的文章",
+        body: "",
+        format: "plain",
+        city: "",
+        listedAt: null,
+        ownerId: String(r.owner_id || ""),
+        viewCount: 0,
+        recommendCount: 0,
+        commentCount: 0,
+        delisted: true,
+      };
+      continue;
+    }
     const a = articleFromRow(r);
     if (a.id) byId[a.id] = a;
   }
   return NextResponse.json({
-    articles: ids.map((id) => byId[id]).filter(Boolean),
+    articles: ids.map((id) => {
+      if (byId[id]) return byId[id];
+      return {
+        id,
+        title: "已删除的文章",
+        body: "",
+        format: "plain",
+        city: "",
+        listedAt: null,
+        ownerId: "",
+        viewCount: 0,
+        recommendCount: 0,
+        commentCount: 0,
+        deleted: true,
+      };
+    }),
   });
 }
 

@@ -1,15 +1,30 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { apiUploadNoteImage } from "../lib/client-api";
+import { mediaDisplayUrl } from "../lib/media-url";
 import { deltaOpsFromBody, kStoredQuill } from "../lib/quill-body";
 
-/** 与 App QuillToolbar.basic 子集对齐：字号/标题/粗斜体/列表/对齐 */
+function rewriteHttpImages(root) {
+  if (!root || typeof window === "undefined") return;
+  if (window.location.protocol !== "https:") return;
+  root.querySelectorAll('img[src^="http://"]').forEach((img) => {
+    const abs = img.getAttribute("src") || "";
+    if (!abs) return;
+    if (!img.dataset.rawSrc) img.dataset.rawSrc = abs;
+    const proxied = mediaDisplayUrl(abs);
+    if (proxied && proxied !== abs) img.setAttribute("src", proxied);
+  });
+}
+
+/** 与 App 对齐：字号/标题/粗斜体/列表/对齐 + 插图 */
 const TOOLBAR = [
   [{ header: [1, 2, 3, false] }],
   [{ size: ["small", false, "large", "huge"] }],
   ["bold", "italic"],
   [{ list: "ordered" }, { list: "bullet" }],
   [{ align: [] }],
+  ["image"],
   ["clean"],
 ];
 
@@ -151,14 +166,51 @@ const QuillEditorField = forwardRef(function QuillEditorField(
         placeholder,
         readOnly: Boolean(readOnlyRef.current),
         modules: {
-          toolbar: TOOLBAR,
+          toolbar: {
+            container: TOOLBAR,
+            handlers: {
+              image() {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = "image/*";
+                input.onchange = async () => {
+                  const file = input.files?.[0];
+                  if (!file) return;
+                  try {
+                    const { url } = await apiUploadNoteImage(file, {
+                      kind: "note-images",
+                    });
+                    const range = q.getSelection(true);
+                    const index =
+                      range && typeof range.index === "number"
+                        ? range.index
+                        : Math.max(0, q.getLength() - 1);
+                    q.insertEmbed(index, "image", url, "user");
+                    q.insertText(index + 1, "\n", "user");
+                    q.setSelection(index + 2, 0, "silent");
+                    emitChange(q, onChangeRef.current);
+                    requestAnimationFrame(() =>
+                      rewriteHttpImages(q.root || editorRef.current),
+                    );
+                  } catch (e) {
+                    window.alert(e?.message || "图片上传失败");
+                  }
+                };
+                input.click();
+              },
+            },
+          },
         },
       });
       const ops = deltaOpsFromBody(seedRef.current.body, seedRef.current.format);
       q.setContents(ops, "silent");
+      rewriteHttpImages(q.root || editorRef.current);
       q.on("text-change", (_delta, _old, source) => {
         if (source !== "user") return;
         emitChange(q, onChangeRef.current);
+        requestAnimationFrame(() =>
+          rewriteHttpImages(q.root || editorRef.current),
+        );
       });
       if (readOnlyRef.current) q.enable(false);
       quillRef.current = q;
@@ -201,6 +253,7 @@ const QuillEditorField = forwardRef(function QuillEditorField(
     if (cur !== next) {
       q.setContents(ops, "silent");
       emitChange(q, onChangeRef.current);
+      requestAnimationFrame(() => rewriteHttpImages(q.root));
     }
   }, [body, format]);
 

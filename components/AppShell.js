@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteNote,
+  fetchArticleById,
   fetchListedArticles,
   fetchFollowingArticles,
   fetchMyFavorites,
@@ -562,14 +563,37 @@ export default function AppShell({
     );
   }
 
-  function openArticle(a, opts = {}) {
-    leaveComposeThen(() => {
-      setSelected(a);
-      setHighlightCommentId(opts.highlightCommentId || "");
-      setMode("reader");
-      setNav("explore");
-      if (a?.id) syncArticleUrl(a.id);
-    });
+  async function openArticle(a, opts = {}) {
+    if (!a?.id) return;
+    // 近期/收藏保留记录；删文或改成非文章类型时只提示，不进阅读器。
+    if (a.deleted) {
+      showToast("文章已删除");
+      return;
+    }
+    if (a.delisted) {
+      showToast("该文章已下架");
+      return;
+    }
+    try {
+      const live = await fetchArticleById(a.id);
+      if (!live) {
+        showToast("该文章已下架");
+        return;
+      }
+      leaveComposeThen(() => {
+        setSelected(live);
+        setHighlightCommentId(opts.highlightCommentId || "");
+        setMode("reader");
+        setNav("explore");
+        syncArticleUrl(live.id);
+      });
+    } catch (e) {
+      if (e?.status === 404) {
+        showToast(e.message || "该文章已下架");
+        return;
+      }
+      showToast(e.message || "打开失败");
+    }
   }
 
   function closeReader() {
@@ -1200,6 +1224,7 @@ export default function AppShell({
                   kind: selected.kind || "article",
                   listingStatus: selected.listingStatus || "listed",
                   city: selected.city || "",
+                  coverUrl: selected.coverUrl || "",
                   listedAt: selected.listedAt,
                   updatedAt: selected.updatedAt,
                   scheduleAt: selected.scheduleAt || null,

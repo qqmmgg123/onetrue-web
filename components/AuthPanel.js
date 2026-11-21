@@ -306,7 +306,7 @@ export default function AuthPanel({ onDone }) {
                 autoComplete="one-time-code"
                 value={otp}
                 onChange={(e) => setOtp(e.target.value)}
-                placeholder="6 位验证码"
+                placeholder="邮件中的验证码"
                 required
               />
             </div>
@@ -388,7 +388,7 @@ export default function AuthPanel({ onDone }) {
                 autoComplete="one-time-code"
                 value={otp}
                 onChange={(e) => setOtp(e.target.value)}
-                placeholder="6 位验证码"
+                placeholder="邮件中的验证码"
                 required
               />
             </div>

@@ -14,6 +14,7 @@ import {
   upsertMyRead,
 } from "../lib/api";
 import { displayTitle, formatWhen } from "../lib/format";
+import { mediaDisplayUrl } from "../lib/media-url";
 import { upsertArticleReadLocal } from "../lib/recent-reads";
 import { articleSharePath } from "../lib/site";
 import { useAuth } from "./AuthProvider";
@@ -152,8 +153,16 @@ export default function ArticleReader({
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  const cover = String(article.coverUrl || "").trim();
+
   return (
     <article className="reader">
+      {cover ? (
+        <div className="reader-cover">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={mediaDisplayUrl(cover)} alt="" />
+        </div>
+      ) : null}
       <h1 className="reader-title">{title}</h1>
       <div className="reader-meta">
         <button

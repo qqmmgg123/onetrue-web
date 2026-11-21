@@ -155,6 +155,9 @@ export async function POST(request) {
     ? Math.trunc(Number(sortOrderRaw))
     : 0;
 
+  const coverUrl =
+    kind === "article" ? String(body.coverUrl ?? body.cover_url ?? "").trim() : "";
+
   const row = {
     id,
     owner_id: user.id,
@@ -165,6 +168,7 @@ export async function POST(request) {
     listing_status:
       kind === "article" || kind === "admonition" ? listingStatus : "draft",
     city,
+    cover_url: coverUrl,
     updated_at: now,
     listed_at:
       (kind === "article" || kind === "admonition") &&

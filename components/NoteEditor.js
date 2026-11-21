@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 import { createNote, deleteNote, updateNote } from "../lib/api";
+import { apiUploadNoteImage } from "../lib/client-api";
+import { mediaDisplayUrl } from "../lib/media-url";
 import { resolveNoteTitleForSave } from "../lib/format";
 import {
   applySpanEdit,
@@ -140,6 +142,7 @@ const NoteEditor = forwardRef(function NoteEditor(
   const [bodyFormat] = useState(note?.format || kStoredQuill);
   const [kind, setKind] = useState(defaultKind);
   const [city, setCity] = useState(note?.city || "");
+  const [coverUrl, setCoverUrl] = useState(note?.coverUrl || "");
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const quillRef = useRef(null);
@@ -208,6 +211,7 @@ const NoteEditor = forwardRef(function NoteEditor(
       plain: String(overrides.plain ?? plainNow() ?? "").trim(),
       kind: overrides.kind ?? kind,
       city: String(overrides.city ?? city ?? "").trim(),
+      coverUrl: String(overrides.coverUrl ?? coverUrl ?? "").trim(),
       scheduleLocal: overrides.scheduleLocal ?? scheduleLocal,
       remindOffsetMin: overrides.remindOffsetMin ?? remindOffsetMin,
       recurFreq: overrides.recurFreq ?? recurFreq,
@@ -216,6 +220,28 @@ const NoteEditor = forwardRef(function NoteEditor(
       recurUntilLocal: overrides.recurUntilLocal ?? recurUntilLocal,
       recurCount: overrides.recurCount ?? recurCount,
     });
+  }
+
+  async function pickCover() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setBusy(true);
+      try {
+        const { url } = await apiUploadNoteImage(file, { kind: "covers" });
+        if (!url) throw new Error("上传成功但未返回地址");
+        setCoverUrl(url);
+        toast?.("封面已更新");
+      } catch (e) {
+        toast?.(e.message || "封面上传失败");
+      } finally {
+        setBusy(false);
+      }
+    };
+    input.click();
   }
 
   function markClean(overrides = {}) {
@@ -552,6 +578,7 @@ const NoteEditor = forwardRef(function NoteEditor(
         format: kStoredQuill,
         kind,
         city,
+        coverUrl: kind === "article" ? String(coverUrl || "").trim() : "",
         // 文章发布即可见（不再单独「上架」）
         listingStatus:
           kind === "article" || kind === "admonition" ? "listed" : "draft",
@@ -697,6 +724,53 @@ const NoteEditor = forwardRef(function NoteEditor(
             }
           />
         </div>
+
+        {kind === "article" ? (
+          <div className="field article-cover-field">
+            <label>封面</label>
+            <div className="article-cover-picker">
+              {coverUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={mediaDisplayUrl(coverUrl)}
+                  alt="封面"
+                  className="article-cover-preview"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                    const fallback = e.currentTarget.nextElementSibling;
+                    if (fallback) fallback.hidden = false;
+                  }}
+                />
+              ) : null}
+              <div
+                className="article-cover-empty"
+                hidden={Boolean(coverUrl)}
+              >
+                未设置封面
+              </div>
+              <div className="article-cover-actions">
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={editorLocked}
+                  onClick={pickCover}
+                >
+                  {coverUrl ? "更换封面" : "上传封面"}
+                </button>
+                {coverUrl ? (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    disabled={editorLocked}
+                    onClick={() => setCoverUrl("")}
+                  >
+                    清除
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="field">
           <label>正文</label>
