@@ -5,6 +5,7 @@ import { authGetUser } from "../../../../lib/server/supabase";
 import {
   NOTE_AI_SYSTEM,
   NOTE_AI_TOOLS,
+  cleanNoteAiReply,
   parseNoteToolCalls,
 } from "../../../../lib/server/note-ai-tools";
 import { callChatWithFailover } from "../../../../lib/server/llm-config";
@@ -60,6 +61,13 @@ export async function POST(request) {
         .map((m) => ({ role: m.role, content: String(m.content || "") }))
     : [];
 
+  const forceReplaceDraft = Boolean(
+    body?.forceReplaceDraft || body?.toolChoice === "replace_draft",
+  );
+  const toolChoice = forceReplaceDraft
+    ? { type: "function", function: { name: "replace_draft" } }
+    : undefined;
+
   try {
     const { data } = await callChatWithFailover({
       messages: [
@@ -71,13 +79,15 @@ export async function POST(request) {
       tools: NOTE_AI_TOOLS,
       modelOverride: body.model,
       temperature: 0.2,
+      toolChoice,
     });
     const msg = data?.choices?.[0]?.message || {};
     const content = String(msg.content || "").trim();
     const toolCalls = parseNoteToolCalls(msg);
+    const reply = cleanNoteAiReply(content, toolCalls);
     return NextResponse.json({
-      reply: content,
-      content,
+      reply,
+      content: reply,
       toolCalls,
     });
   } catch (e) {

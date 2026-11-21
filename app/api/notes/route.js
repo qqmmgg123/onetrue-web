@@ -1,7 +1,11 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { readAccessToken } from "../../../lib/server/session";
-import { authGetUser, hasServerSupabase } from "../../../lib/server/supabase";
+import {
+  authGetUser,
+  fetchProfileServer,
+  hasServerSupabase,
+} from "../../../lib/server/supabase";
 import { restGet, restPost } from "../../../lib/server/rest";
 import { resolveNoteTitleForSave } from "../../../lib/format";
 import {
@@ -84,6 +88,15 @@ export async function POST(request) {
   }
 
   const kind = String(body.kind || "note").trim() || "note";
+  if (kind === "admonition") {
+    const profile = await fetchProfileServer(user.id, token);
+    if (!profile?.isAdmin) {
+      return NextResponse.json(
+        { error: "仅管理员可推荐谏言" },
+        { status: 403 },
+      );
+    }
+  }
   const text = String(body.body || "");
   const format = String(body.format || "quill");
   const title = resolveNoteTitleForSave({
@@ -93,7 +106,9 @@ export async function POST(request) {
     format,
   });
   const listingStatus =
-    body.listingStatus === "listed" || body.list === true
+    kind === "admonition" ||
+    body.listingStatus === "listed" ||
+    body.list === true
       ? "listed"
       : "draft";
   const city = String(body.city || "").trim();
@@ -147,11 +162,15 @@ export async function POST(request) {
     title,
     body: text,
     format,
-    listing_status: kind === "article" ? listingStatus : "draft",
+    listing_status:
+      kind === "article" || kind === "admonition" ? listingStatus : "draft",
     city,
     updated_at: now,
     listed_at:
-      kind === "article" && listingStatus === "listed" ? now : null,
+      (kind === "article" || kind === "admonition") &&
+      listingStatus === "listed"
+        ? now
+        : null,
     schedule_at: scheduleAt,
     remind_at: remindAt,
     sort_order: sortOrder,

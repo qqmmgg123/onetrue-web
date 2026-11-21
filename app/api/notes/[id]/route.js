@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { readAccessToken } from "../../../../lib/server/session";
-import { authGetUser, hasServerSupabase } from "../../../../lib/server/supabase";
+import {
+  authGetUser,
+  fetchProfileServer,
+  hasServerSupabase,
+} from "../../../../lib/server/supabase";
 import { restGet, restPatch, restPost } from "../../../../lib/server/rest";
 import { resolveNoteTitleForSave } from "../../../../lib/format";
 import {
@@ -67,6 +71,15 @@ export async function PATCH(request, { params }) {
     }
 
     const nextKind = patch.kind || cur.kind;
+    if (nextKind === "admonition" || cur.kind === "admonition") {
+      const profile = await fetchProfileServer(user.id, token);
+      if (!profile?.isAdmin) {
+        return NextResponse.json(
+          { error: "仅管理员可推荐谏言" },
+          { status: 403 },
+        );
+      }
+    }
     const nextBody = patch.body != null ? patch.body : cur.body;
     const nextFormat = patch.format || cur.format || "quill";
     // 与 App 一致：笔记/备忘空标题用正文截取
@@ -170,7 +183,11 @@ export async function PATCH(request, { params }) {
     } else if (body.listingStatus === "draft" || body.list === false) {
       listingStatus = "draft";
     }
-    if (nextKind !== "article") listingStatus = "draft";
+    if (nextKind === "admonition") {
+      listingStatus = "listed";
+    } else if (nextKind !== "article") {
+      listingStatus = "draft";
+    }
     patch.listing_status = listingStatus;
     if (listingStatus === "listed" && !cur.listed_at) {
       patch.listed_at = now;

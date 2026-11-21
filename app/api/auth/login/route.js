@@ -75,8 +75,24 @@ export async function POST(request) {
     setSessionCookies(res, session, request);
     return res;
   } catch (e) {
+    const msg = e.message || "登录失败";
+    const lower = String(msg).toLowerCase();
+    if (
+      lower.includes("email not confirmed") ||
+      lower.includes("email address not confirmed")
+    ) {
+      return NextResponse.json(
+        {
+          error: "邮箱尚未验证，请先完成邮箱验证",
+          code: "email_not_confirmed",
+          needsOtp: true,
+          email,
+        },
+        { status: 401 },
+      );
+    }
     return NextResponse.json(
-      { error: e.message || "登录失败" },
+      { error: msg },
       { status: e.status && e.status < 500 ? e.status : 401 },
     );
   }

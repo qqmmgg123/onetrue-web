@@ -9,7 +9,22 @@ import {
 } from "react";
 import { createNote, deleteNote, updateNote } from "../lib/api";
 import { resolveNoteTitleForSave } from "../lib/format";
-import { bodyToStorage, isBodyEmpty, kStoredQuill } from "../lib/quill-body";
+import {
+  applySpanEdit,
+  applySpanEditsSequential,
+  coalesceEditSpanCalls,
+  extractSpanEditIntents,
+  missingSpanInsertTexts,
+  normalizeNoteKind,
+  pickDraftPlain,
+  sanitizeAiPlainText,
+} from "../lib/ai-plain";
+import {
+  bodyToStorage,
+  isBodyEmpty,
+  kStoredQuill,
+  plainTextFromBody,
+} from "../lib/quill-body";
 import {
   REMIND_OFFSET_PRESETS,
   formatRemindOffset,
@@ -26,6 +41,7 @@ import {
   toDatetimeLocalValue,
   weekdayToByDay,
 } from "../lib/note-recur";
+import { useAuth } from "./AuthProvider";
 import NoteAiPanel from "./NoteAiPanel";
 import QuillEditorField from "./QuillEditorField";
 import VoiceMicButton from "./VoiceMicButton";
@@ -45,6 +61,8 @@ export function kindNoun(kind) {
       return "日常";
     case "article":
       return "文章";
+    case "admonition":
+      return "谏言";
     default:
       return "笔记";
   }
@@ -58,6 +76,8 @@ export function kindActionLabel(kind) {
       return "安排";
     case "article":
       return "发布";
+    case "admonition":
+      return "推荐";
     default:
       return "保存";
   }
@@ -71,6 +91,8 @@ export function kindHint(kind) {
       return "将笔记安排到日常";
     case "article":
       return "将笔记发布到阅读";
+    case "admonition":
+      return "推荐到谏言";
     default:
       return "记录你的念头和思绪";
   }
@@ -84,6 +106,8 @@ function busyLabel(kind) {
       return "正在安排…";
     case "article":
       return "正在发布…";
+    case "admonition":
+      return "正在推荐…";
     default:
       return "正在保存…";
   }
@@ -102,6 +126,7 @@ const NoteEditor = forwardRef(function NoteEditor(
   },
   ref,
 ) {
+  const { isAdmin } = useAuth();
   const editing = Boolean(note?.id);
   const defaultKind =
     note?.kind ||
@@ -110,12 +135,15 @@ const NoteEditor = forwardRef(function NoteEditor(
 
   const [title, setTitle] = useState(note?.title || "");
   const [bodyOps, setBodyOps] = useState(null);
-  const [bodySeed] = useState(note?.body || "");
+  // 可变 seed：AI 写入时同步，避免 imperative replace 失败或编辑器重挂载丢正文
+  const [bodySeed, setBodySeed] = useState(note?.body || "");
   const [bodyFormat] = useState(note?.format || kStoredQuill);
   const [kind, setKind] = useState(defaultKind);
   const [city, setCity] = useState(note?.city || "");
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const quillRef = useRef(null);
+  const editorLocked = busy || aiBusy;
   const micRef = useRef(null);
   const voiceInserting = useRef(false);
   const aiRefKey = note?.id || `draft:${defaultKind}`;
@@ -162,31 +190,37 @@ const NoteEditor = forwardRef(function NoteEditor(
   const baselineReady = useRef(false);
 
   function plainNow() {
-    return (
-      quillRef.current?.getPlain?.() ||
-      (bodyOps
-        ? bodyOps
-            .map((o) => (typeof o.insert === "string" ? o.insert : ""))
-            .join("")
-            .replace(/\n+$/, "")
-        : "")
-    );
+    if (quillRef.current?.getPlain) {
+      return quillRef.current.getPlain() || "";
+    }
+    if (bodyOps) {
+      return bodyOps
+        .map((o) => (typeof o.insert === "string" ? o.insert : ""))
+        .join("")
+        .replace(/\n+$/, "");
+    }
+    return plainTextFromBody(bodySeed, bodyFormat);
   }
 
-  function snapshot() {
+  function snapshot(overrides = {}) {
     return JSON.stringify({
-      title: String(title || "").trim(),
-      plain: String(plainNow() || "").trim(),
-      kind,
-      city: String(city || "").trim(),
-      scheduleLocal,
-      remindOffsetMin,
-      recurFreq,
-      recurByday,
-      recurEndMode,
-      recurUntilLocal,
-      recurCount,
+      title: String(overrides.title ?? title ?? "").trim(),
+      plain: String(overrides.plain ?? plainNow() ?? "").trim(),
+      kind: overrides.kind ?? kind,
+      city: String(overrides.city ?? city ?? "").trim(),
+      scheduleLocal: overrides.scheduleLocal ?? scheduleLocal,
+      remindOffsetMin: overrides.remindOffsetMin ?? remindOffsetMin,
+      recurFreq: overrides.recurFreq ?? recurFreq,
+      recurByday: overrides.recurByday ?? recurByday,
+      recurEndMode: overrides.recurEndMode ?? recurEndMode,
+      recurUntilLocal: overrides.recurUntilLocal ?? recurUntilLocal,
+      recurCount: overrides.recurCount ?? recurCount,
     });
+  }
+
+  function markClean(overrides = {}) {
+    baselineRef.current = snapshot(overrides);
+    baselineReady.current = true;
   }
 
   function isDirty() {
@@ -195,12 +229,17 @@ const NoteEditor = forwardRef(function NoteEditor(
   }
 
   useEffect(() => {
-    const t = window.setTimeout(() => {
-      baselineRef.current = snapshot();
-      baselineReady.current = true;
-    }, 400);
-    return () => window.clearTimeout(t);
-    // 仅挂载时采基线
+    let tries = 0;
+    const id = window.setInterval(() => {
+      tries += 1;
+      const quillReady = Boolean(quillRef.current?.getPlain);
+      if (quillReady || tries >= 50) {
+        markClean();
+        window.clearInterval(id);
+      }
+    }, 100);
+    return () => window.clearInterval(id);
+    // 仅挂载时采基线（等 Quill 就绪，避免空正文基线导致误脏）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -211,7 +250,12 @@ const NoteEditor = forwardRef(function NoteEditor(
       schedule_at: scheduleLocal
         ? fromDatetimeLocalValue(scheduleLocal)?.toISOString() || null
         : null,
-      remind_at: null,
+      remind_at: (() => {
+        if (kind !== "schedule") return null;
+        const sched = fromDatetimeLocalValue(scheduleLocal);
+        const r = remindAtFromOffset(sched, remindOffsetMin);
+        return r ? r.toISOString() : null;
+      })(),
       recur_freq: recurFreq,
       recur_byday: recurByday,
       recur_until:
@@ -221,7 +265,8 @@ const NoteEditor = forwardRef(function NoteEditor(
       recur_count:
         recurEndMode === "count" ? parseInt(recurCount, 10) || null : null,
       remind_offset_min: remindOffsetMin,
-      listed: kind === "article",
+      // 文章/谏言发布即可见
+      listed: kind === "article" || kind === "admonition",
       city,
     };
   }
@@ -243,9 +288,28 @@ const NoteEditor = forwardRef(function NoteEditor(
     };
   }
 
-  function applyTools(calls) {
+  function commitPlain(nextPlain) {
+    const plain = String(nextPlain ?? "");
+    const ops =
+      quillRef.current?.replacePlain?.(plain) ||
+      [
+        {
+          insert: plain.endsWith("\n") ? plain : `${plain}\n`,
+        },
+      ];
+    setBodyOps(ops);
+    setBodySeed(JSON.stringify(ops));
+    return ops;
+  }
+
+  function applyTools(calls, { userText = "" } = {}) {
     const tips = [];
-    for (const call of calls || []) {
+    // 同轮多次正文改动：先在本地 plain 上算完，最后只写回一次，避免中间态互相覆盖
+    const plainBefore = plainNow() || "";
+    let plainCursor = plainBefore;
+    let bodyDirty = false;
+    const queued = coalesceEditSpanCalls(calls || []);
+    for (const call of queued) {
       const name = call.name;
       const args = call.args || {};
       switch (name) {
@@ -254,19 +318,51 @@ const NoteEditor = forwardRef(function NoteEditor(
           tips.push("已改标题");
           break;
         }
+        case "append_draft": {
+          const plain =
+            pickDraftPlain(args) || sanitizeAiPlainText(args.plain || "");
+          if (!plain) {
+            tips.push("追加内容为空，未改动");
+            break;
+          }
+          plainCursor = plainCursor.trim()
+            ? `${plainCursor.trim()}\n${plain}`
+            : plain;
+          bodyDirty = true;
+          tips.push("已追加正文");
+          break;
+        }
+        case "edit_span": {
+          const result = applySpanEdit(plainCursor, args);
+          if (!result.ok) {
+            tips.push(result.error || "局部编辑失败");
+            break;
+          }
+          plainCursor = result.next;
+          bodyDirty = true;
+          tips.push(result.tip || "已局部编辑");
+          break;
+        }
         case "replace_draft": {
-          const plain = String(args.plain || "").trim();
+          const plain = pickDraftPlain(args) || sanitizeAiPlainText(args.plain || "");
           if (!plain) {
             tips.push("正文为空，未改动");
             break;
           }
-          quillRef.current?.replacePlain?.(plain);
+          plainCursor = plain;
+          bodyDirty = true;
           tips.push("已写入正文");
           break;
         }
         case "replace_delta": {
           if (Array.isArray(args.delta)) {
-            quillRef.current?.replaceDelta?.(args.delta);
+            if (bodyDirty) commitPlain(plainCursor);
+            bodyDirty = false;
+            const ops =
+              quillRef.current?.replaceDelta?.(args.delta) || args.delta;
+            setBodyOps(ops);
+            setBodySeed(JSON.stringify(ops));
+            plainCursor = plainNow() || plainCursor;
             tips.push("已按富文本写入正文");
           } else {
             tips.push("replace_delta 无效");
@@ -279,16 +375,50 @@ const NoteEditor = forwardRef(function NoteEditor(
           break;
         }
         case "set_note_options": {
-          if (args.kind) {
-            const k = String(args.kind).trim();
-            if (["note", "memo", "schedule", "article"].includes(k)) {
+          if (args.kind != null && String(args.kind).trim()) {
+            const raw = String(args.kind).trim();
+            const k = normalizeNoteKind(raw, { allowAdmonition: isAdmin });
+            if (k) {
               setKind(k);
+              if (k === "schedule" && !scheduleLocal) {
+                setScheduleLocal(toDatetimeLocalValue(new Date()));
+              }
+            } else if (/admonition|谏言/i.test(raw) && !isAdmin) {
+              tips.push("谏言仅管理员可设");
+            } else {
+              tips.push(`未识别的类型「${raw}」`);
             }
           }
           if (args.title != null) setTitle(String(args.title).trim());
           if (args.city != null) setCity(String(args.city).trim());
-          if (args.schedule_at) {
-            setScheduleLocal(toDatetimeLocalValue(args.schedule_at));
+          if (args.schedule_at != null) {
+            const raw = String(args.schedule_at || "").trim();
+            if (!raw) setScheduleLocal("");
+            else setScheduleLocal(toDatetimeLocalValue(args.schedule_at));
+          }
+          if (args.remind_at != null) {
+            const raw = String(args.remind_at || "").trim();
+            const asSchedule =
+              String(args.kind || kind).trim() === "schedule";
+            if (asSchedule) {
+              if (!raw) {
+                setRemindOffsetMin(-1);
+              } else {
+                const remind = new Date(raw);
+                const sched =
+                  fromDatetimeLocalValue(
+                    args.schedule_at
+                      ? toDatetimeLocalValue(args.schedule_at)
+                      : scheduleLocal,
+                  ) || null;
+                if (!Number.isNaN(remind.getTime()) && sched) {
+                  const mins = Math.round(
+                    (sched.getTime() - remind.getTime()) / 60000,
+                  );
+                  setRemindOffsetMin(mins < 0 ? 0 : mins);
+                }
+              }
+            }
           }
           if (args.recur_freq != null) {
             setRecurFreq(normalizeRecurFreq(args.recur_freq));
@@ -296,7 +426,7 @@ const NoteEditor = forwardRef(function NoteEditor(
           if (args.recur_byday != null) {
             setRecurByday(String(args.recur_byday).toUpperCase());
           }
-          if (args.recur_until) {
+          if (args.recur_until != null && String(args.recur_until).trim()) {
             setRecurEndMode("until");
             const d = new Date(args.recur_until);
             if (!Number.isNaN(d.getTime())) {
@@ -310,7 +440,18 @@ const NoteEditor = forwardRef(function NoteEditor(
             setRecurCount(String(args.recur_count));
           }
           if (args.remind_offset_min != null) {
-            setRemindOffsetMin(Number(args.remind_offset_min));
+            const m = Number(args.remind_offset_min);
+            setRemindOffsetMin(Number.isFinite(m) && m < 0 ? -1 : m || 0);
+          }
+          // listed：文章/谏言保存时强制上架；AI 要求上架时切到文章
+          if (args.listed != null) {
+            const on =
+              args.listed === true ||
+              args.listed === 1 ||
+              String(args.listed) === "true";
+            if (on && kind !== "article" && kind !== "admonition") {
+              setKind("article");
+            }
           }
           tips.push("已更新笔记选项");
           break;
@@ -319,7 +460,30 @@ const NoteEditor = forwardRef(function NoteEditor(
           tips.push(`未知工具：${name}`);
       }
     }
+
+    // 模型常漏掉「后面写」或误用 insert_before：按用户话术从改前正文确定性重放
+    const intents = extractSpanEditIntents(userText);
+    if (intents.length) {
+      const missing = missingSpanInsertTexts(plainCursor, intents);
+      if (missing.length) {
+        const repaired = applySpanEditsSequential(plainBefore, intents);
+        if (repaired.tips.length) {
+          plainCursor = repaired.plain;
+          bodyDirty = true;
+          for (let i = tips.length - 1; i >= 0; i -= 1) {
+            if (tipIsSpanEditSafe(tips[i])) tips.splice(i, 1);
+          }
+          tips.push(...repaired.tips);
+        }
+      }
+    }
+
+    if (bodyDirty) commitPlain(plainCursor);
     return tips;
+  }
+
+  function tipIsSpanEditSafe(tip) {
+    return /已删除指定片段|已改写指定片段|已在指定句/.test(String(tip || ""));
   }
 
   async function handleDelete() {
@@ -389,7 +553,8 @@ const NoteEditor = forwardRef(function NoteEditor(
         kind,
         city,
         // 文章发布即可见（不再单独「上架」）
-        listingStatus: kind === "article" ? "listed" : "draft",
+        listingStatus:
+          kind === "article" || kind === "admonition" ? "listed" : "draft",
       };
       // 新备忘插到最前
       if (!editing && kind === "memo") {
@@ -442,6 +607,8 @@ const NoteEditor = forwardRef(function NoteEditor(
       const saved = editing
         ? await updateNote(note.id, payload)
         : await createNote(payload);
+      const titleForBaseline =
+        resolvedTitle || String(title || "").trim();
       if (resolvedTitle && resolvedTitle !== String(title || "").trim()) {
         setTitle(resolvedTitle);
       }
@@ -452,11 +619,14 @@ const NoteEditor = forwardRef(function NoteEditor(
             ? "已保存"
             : `已${kindActionLabel(kind)}`,
       );
-      baselineRef.current = snapshot();
-      baselineReady.current = true;
+      // 用落库标题 + 当前正文采基线，避免 setTitle 异步导致「已保存仍脏」
+      markClean({
+        title: titleForBaseline,
+        plain: String(plainNow() || "").trim(),
+      });
       if (!skipNavigate) {
-        if (editing) onSaved?.(saved);
-        else onCreated?.(saved);
+        if (editing) await onSaved?.(saved);
+        else await onCreated?.(saved);
       }
       return saved;
     } catch (e) {
@@ -490,12 +660,15 @@ const NoteEditor = forwardRef(function NoteEditor(
                 ["memo", "备忘"],
                 ["schedule", "日常"],
                 ["article", "文章"],
+                ...(isAdmin ? [["admonition", "谏言"]] : []),
               ].map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
                   className={`btn ghost ${kind === id ? "on" : ""}`}
+                  disabled={editorLocked}
                   onClick={() => {
+                    if (editorLocked) return;
                     setKind(id);
                     if (id === "schedule" && !scheduleLocal) {
                       setScheduleLocal(toDatetimeLocalValue(new Date()));
@@ -514,6 +687,7 @@ const NoteEditor = forwardRef(function NoteEditor(
           <label>标题</label>
           <input
             value={title}
+            disabled={editorLocked}
             onChange={(e) => {
               setTitle(e.target.value);
               stopMicOnKeyboard();
@@ -532,37 +706,48 @@ const NoteEditor = forwardRef(function NoteEditor(
               body={bodySeed}
               format={bodyFormat}
               placeholder="写点什么…"
+              readOnly={editorLocked}
               onChange={(ops) => {
                 setBodyOps(ops);
                 stopMicOnKeyboard();
               }}
             />
-            <div className="quill-mic-fab">
-              <VoiceMicButton
-                ref={micRef}
-                toast={toast}
-                onText={(t) => {
-                  voiceInserting.current = true;
-                  try {
-                    quillRef.current?.insertText?.(t);
-                  } finally {
-                    queueMicrotask(() => {
-                      voiceInserting.current = false;
-                    });
-                  }
-                }}
-              />
-            </div>
+            {!editorLocked ? (
+              <div className="quill-mic-fab">
+                <VoiceMicButton
+                  ref={micRef}
+                  toast={toast}
+                  onText={(t) => {
+                    voiceInserting.current = true;
+                    try {
+                      quillRef.current?.insertText?.(t);
+                    } finally {
+                      queueMicrotask(() => {
+                        voiceInserting.current = false;
+                      });
+                    }
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
 
         {kind === "schedule" ? (
-          <div className="schedule-opts">
+          <div
+            className="schedule-opts"
+            style={
+              editorLocked
+                ? { opacity: 0.55, pointerEvents: "none" }
+                : undefined
+            }
+          >
             <div className="field">
               <label>日常时间</label>
               <input
                 type="datetime-local"
                 value={scheduleLocal}
+                disabled={editorLocked}
                 onChange={(e) => setScheduleLocal(e.target.value)}
               />
             </div>
@@ -674,22 +859,11 @@ const NoteEditor = forwardRef(function NoteEditor(
           </div>
         ) : null}
 
-        {kind === "article" ? (
-          <div className="field">
-            <label>城市（可选）</label>
-            <input
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              placeholder="如：上海"
-            />
-          </div>
-        ) : null}
-
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             className="btn"
             type="button"
-            disabled={busy}
+            disabled={busy || aiBusy}
             onClick={() => handleSave().catch(() => {})}
           >
             {busy ? busyLabel(kind) : action}
@@ -698,7 +872,7 @@ const NoteEditor = forwardRef(function NoteEditor(
             <button
               className="btn ghost"
               type="button"
-              disabled={busy}
+              disabled={busy || aiBusy}
               onClick={() => handleDelete()}
             >
               删除
@@ -715,6 +889,7 @@ const NoteEditor = forwardRef(function NoteEditor(
           getDraft={getDraft}
           applyTools={applyTools}
           toast={toast}
+          onBusyChange={setAiBusy}
         />
       </aside>
     </div>

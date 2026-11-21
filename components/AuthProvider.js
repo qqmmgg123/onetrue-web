@@ -17,6 +17,8 @@ import {
   apiSignup,
   apiVerifyOtp,
   apiResendOtp,
+  apiForgotPassword,
+  apiResetPassword,
 } from "../lib/client-api";
 
 const AuthContext = createContext(null);
@@ -62,6 +64,7 @@ export function AuthProvider({ children }) {
         id: payload.user.id,
         nickname: "",
         avatarUrl: "",
+        isAdmin: false,
         displayName: `用户${payload.user.id.slice(0, 4)}`,
       },
     );
@@ -165,6 +168,19 @@ export function AuthProvider({ children }) {
     return apiResendOtp({ email, phone, type });
   }, []);
 
+  const forgotPassword = useCallback(async ({ email }) => {
+    return apiForgotPassword({ email });
+  }, []);
+
+  const resetPassword = useCallback(
+    async ({ email, token, password }) => {
+      const data = await apiResetPassword({ email, token, password });
+      applySession(data);
+      return data.user;
+    },
+    [applySession],
+  );
+
   const signOut = useCallback(async () => {
     try {
       await apiLogout();
@@ -186,11 +202,14 @@ export function AuthProvider({ children }) {
       configured,
       gatewayOk,
       isLoggedIn: Boolean(user?.id),
+      isAdmin: Boolean(profile?.isAdmin),
       authExpiredTick,
       signIn,
       signUp,
       verifyOtp,
       resendOtp,
+      forgotPassword,
+      resetPassword,
       signOut,
       refreshProfile,
       setProfile,
@@ -207,6 +226,8 @@ export function AuthProvider({ children }) {
       signUp,
       verifyOtp,
       resendOtp,
+      forgotPassword,
+      resetPassword,
       signOut,
       refreshProfile,
       clearLocalAuth,

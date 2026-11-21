@@ -25,6 +25,7 @@ async function profileFor(user, token) {
       id: user.id,
       nickname: "",
       avatarUrl: "",
+      isAdmin: false,
       displayName: `用户${String(user.id).slice(0, 4)}`,
     };
   }

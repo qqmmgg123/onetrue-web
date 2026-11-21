@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { setSessionCookies } from "../../../../lib/server/session";
 import {
+  authResendOtp,
   authSignUp,
   ensureProfileServer,
   hasServerSupabase,
@@ -88,20 +89,43 @@ export async function POST(request) {
       return res;
     }
 
-    // 需邮箱验证码确认
+    // Confirm email 开启时：已注册且已验证的邮箱会「静默成功」且 identities 为空、不发信
+    const identities = data?.user?.identities;
+    if (Array.isArray(identities) && identities.length === 0) {
+      return NextResponse.json(
+        {
+          error: "该邮箱已注册，请直接登录",
+          code: "already_registered",
+        },
+        { status: 400 },
+      );
+    }
+
+    // 新注册或「已登记未验证」：再主动 resend 一次，避免只进验证页却没信
+    let mailHint = "验证码已发送到邮箱，请查收后完成注册";
+    try {
+      await authResendOtp({ email, type: "signup" });
+    } catch (mailErr) {
+      const m = String(mailErr?.message || "").toLowerCase();
+      if (m.includes("rate") || m.includes("security purposes")) {
+        mailHint =
+          "验证码发送较频繁，请稍后再点「重发验证码」，或查收此前邮件（含垃圾箱）";
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       needsOtp: true,
       channel: "email",
       email,
-      message: "验证码已发送到邮箱，请查收后完成注册",
+      message: mailHint,
     });
   } catch (e) {
     const msg = e.message || "注册失败";
     const lower = String(msg).toLowerCase();
     let friendly = msg;
     if (lower.includes("already") || lower.includes("registered")) {
-      friendly = "该邮箱已注册，请直接登录";
+      friendly = "该邮箱已注册，请直接登录；若尚未验证，请点「去验证邮箱」";
     }
     return NextResponse.json(
       { error: friendly },

@@ -1,20 +1,64 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { userFacingError } from "../lib/user-facing-error";
 import { useAuth } from "./AuthProvider";
 import { IconEye } from "./icons";
 
+function PasswordInput({
+  value,
+  onChange,
+  autoComplete,
+  show,
+  onToggle,
+  minLength,
+}) {
+  return (
+    <div className="password-field">
+      <button
+        type="button"
+        className="password-toggle"
+        aria-label={show ? "隐藏密码" : "显示密码"}
+        title={show ? "隐藏密码" : "显示密码"}
+        onClick={onToggle}
+      >
+        <IconEye off={show} />
+      </button>
+      <input
+        type={show ? "text" : "password"}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={onChange}
+        required
+        minLength={minLength}
+      />
+    </div>
+  );
+}
+
 /**
- * 登录 / 注册（邮箱+密码；注册需邮箱验证码，国内送达靠 Supabase 自定义 SMTP）
+ * 登录 / 注册 / 忘记密码（邮箱 OTP 风格）
  */
 export default function AuthPanel({ onDone }) {
-  const { signIn, signUp, verifyOtp, resendOtp, configured } = useAuth();
-  const [mode, setMode] = useState("login"); // login | register | otp
+  const {
+    signIn,
+    signUp,
+    verifyOtp,
+    resendOtp,
+    forgotPassword,
+    resetPassword,
+    configured,
+  } = useAuth();
+  // login | register | otp | forgot | reset
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
   const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState("");
@@ -38,6 +82,29 @@ export default function AuthPanel({ onDone }) {
     );
   }
 
+  async function goVerifyExisting() {
+    setError("");
+    setInfo("");
+    if (!email.trim()) {
+      setError("请先填写邮箱");
+      return;
+    }
+    setBusy(true);
+    try {
+      await resendOtp({ email, type: "signup" });
+      setMode("otp");
+      setInfo("验证码已发送到邮箱，请查收后完成验证");
+      setCooldown(60);
+    } catch (err) {
+      // 即便发送失败也进入验证页，方便输入旧码或稍后重发
+      setMode("otp");
+      setError(userFacingError(err, "发送失败"));
+      setInfo("若此前已发过验证码，可直接输入；也可稍后重发");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onLogin(e) {
     e.preventDefault();
     setError("");
@@ -46,7 +113,18 @@ export default function AuthPanel({ onDone }) {
       await signIn({ email, password });
       onDone?.();
     } catch (err) {
-      setError(err.message || "登录失败");
+      if (err?.needsOtp || err?.code === "email_not_confirmed") {
+        setBusy(false);
+        await goVerifyExisting();
+        return;
+      }
+      const msg = userFacingError(err, "登录失败");
+      if (msg.includes("尚未验证")) {
+        setBusy(false);
+        await goVerifyExisting();
+        return;
+      }
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -75,7 +153,7 @@ export default function AuthPanel({ onDone }) {
       }
       onDone?.();
     } catch (err) {
-      setError(err.message || "注册失败");
+      setError(userFacingError(err, "注册失败"));
     } finally {
       setBusy(false);
     }
@@ -94,7 +172,7 @@ export default function AuthPanel({ onDone }) {
       });
       onDone?.();
     } catch (err) {
-      setError(err.message || "验证失败");
+      setError(userFacingError(err, "验证失败"));
     } finally {
       setBusy(false);
     }
@@ -109,7 +187,69 @@ export default function AuthPanel({ onDone }) {
       setInfo("验证码已重新发送");
       setCooldown(60);
     } catch (err) {
-      setError(err.message || "发送失败");
+      setError(userFacingError(err, "发送失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onForgot(e) {
+    e.preventDefault();
+    setError("");
+    setInfo("");
+    setBusy(true);
+    try {
+      const data = await forgotPassword({ email });
+      setMode("reset");
+      setOtp("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setInfo(data?.message || "若该邮箱已注册，验证码将发送到邮箱");
+      setCooldown(60);
+    } catch (err) {
+      setError(userFacingError(err, "发送失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onResendReset() {
+    if (cooldown > 0 || busy) return;
+    setError("");
+    setBusy(true);
+    try {
+      await forgotPassword({ email });
+      setInfo("验证码已重新发送");
+      setCooldown(60);
+    } catch (err) {
+      setError(userFacingError(err, "发送失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onReset(e) {
+    e.preventDefault();
+    setError("");
+    setInfo("");
+    if (newPassword.length < 6) {
+      setError("新密码至少 6 位");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("两次输入的新密码不一致");
+      return;
+    }
+    setBusy(true);
+    try {
+      await resetPassword({
+        email,
+        token: otp,
+        password: newPassword,
+      });
+      onDone?.();
+    } catch (err) {
+      setError(userFacingError(err, "重置失败"));
     } finally {
       setBusy(false);
     }
@@ -117,7 +257,7 @@ export default function AuthPanel({ onDone }) {
 
   return (
     <div className="panel">
-      {mode !== "otp" ? (
+      {mode === "login" || mode === "register" ? (
         <div className="auth-tabs" role="tablist">
           <button
             type="button"
@@ -144,8 +284,12 @@ export default function AuthPanel({ onDone }) {
             注册
           </button>
         </div>
-      ) : (
+      ) : mode === "otp" ? (
         <h2>验证邮箱</h2>
+      ) : mode === "forgot" ? (
+        <h2>忘记密码</h2>
+      ) : (
+        <h2>重置密码</h2>
       )}
 
       {mode === "otp" ? (
@@ -169,7 +313,7 @@ export default function AuthPanel({ onDone }) {
             {info ? <p className="hint">{info}</p> : null}
             {error ? <div className="error">{error}</div> : null}
             <button className="btn" type="submit" disabled={busy}>
-              {busy ? "验证中…" : "完成注册"}
+              {busy ? "验证中…" : "完成验证"}
             </button>
             <div style={{ marginTop: 12, display: "flex", gap: 12 }}>
               <button
@@ -187,6 +331,112 @@ export default function AuthPanel({ onDone }) {
                 onClick={() => {
                   setMode("register");
                   setOtp("");
+                  setError("");
+                }}
+              >
+                返回
+              </button>
+            </div>
+          </form>
+        </>
+      ) : mode === "forgot" ? (
+        <>
+          <p className="hint">输入注册邮箱，我们将发送验证码用于重置密码。</p>
+          <form onSubmit={onForgot}>
+            <div className="field">
+              <label>邮箱</label>
+              <input
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            {info ? <p className="hint">{info}</p> : null}
+            {error ? <div className="error">{error}</div> : null}
+            <button className="btn" type="submit" disabled={busy}>
+              {busy ? "发送中…" : "发送验证码"}
+            </button>
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={busy}
+                onClick={() => {
+                  setMode("login");
+                  setError("");
+                  setInfo("");
+                }}
+              >
+                返回登录
+              </button>
+            </div>
+          </form>
+        </>
+      ) : mode === "reset" ? (
+        <>
+          <p className="hint">
+            验证码已发至 <strong>{email}</strong>
+            。请输入验证码并设置新密码。
+          </p>
+          <form onSubmit={onReset}>
+            <div className="field">
+              <label>验证码</label>
+              <input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                placeholder="6 位验证码"
+                required
+              />
+            </div>
+            <div className="field">
+              <label>新密码</label>
+              <PasswordInput
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                show={showNewPassword}
+                onToggle={() => setShowNewPassword((v) => !v)}
+                minLength={6}
+              />
+            </div>
+            <div className="field">
+              <label>确认新密码</label>
+              <PasswordInput
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                show={showNewPassword}
+                onToggle={() => setShowNewPassword((v) => !v)}
+                minLength={6}
+              />
+            </div>
+            {info ? <p className="hint">{info}</p> : null}
+            {error ? <div className="error">{error}</div> : null}
+            <button className="btn" type="submit" disabled={busy}>
+              {busy ? "重置中…" : "确认重置"}
+            </button>
+            <div style={{ marginTop: 12, display: "flex", gap: 12 }}>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={busy || cooldown > 0}
+                onClick={onResendReset}
+              >
+                {cooldown > 0 ? `${cooldown}s 后可重发` : "重发验证码"}
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={busy}
+                onClick={() => {
+                  setMode("forgot");
+                  setOtp("");
+                  setNewPassword("");
+                  setConfirmPassword("");
                   setError("");
                 }}
               >
@@ -215,27 +465,16 @@ export default function AuthPanel({ onDone }) {
             </div>
             <div className="field">
               <label>密码</label>
-              <div className="password-field">
-                <button
-                  type="button"
-                  className="password-toggle"
-                  aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                  title={showPassword ? "隐藏密码" : "显示密码"}
-                  onClick={() => setShowPassword((v) => !v)}
-                >
-                  <IconEye off={showPassword} />
-                </button>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  autoComplete={
-                    mode === "login" ? "current-password" : "new-password"
-                  }
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={mode === "register" ? 6 : undefined}
-                />
-              </div>
+              <PasswordInput
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+                show={showPassword}
+                onToggle={() => setShowPassword((v) => !v)}
+                minLength={mode === "register" ? 6 : undefined}
+              />
             </div>
             {mode === "register" ? (
               <div className="field">
@@ -249,6 +488,25 @@ export default function AuthPanel({ onDone }) {
               </div>
             ) : null}
             {error ? <div className="error">{error}</div> : null}
+            {mode === "login" ? (
+              <div style={{ marginBottom: 12, textAlign: "right" }}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ padding: "4px 8px", fontSize: 13 }}
+                  onClick={() => {
+                    setMode("forgot");
+                    setError("");
+                    setInfo("");
+                    setOtp("");
+                    setNewPassword("");
+                    setConfirmPassword("");
+                  }}
+                >
+                  忘记密码？
+                </button>
+              </div>
+            ) : null}
             <button className="btn" type="submit" disabled={busy}>
               {busy
                 ? mode === "login"
@@ -258,6 +516,18 @@ export default function AuthPanel({ onDone }) {
                   ? "登录"
                   : "注册"}
             </button>
+            {mode === "register" ? (
+              <div style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy}
+                  onClick={goVerifyExisting}
+                >
+                  已注册未验证？去验证邮箱
+                </button>
+              </div>
+            ) : null}
           </form>
         </>
       )}

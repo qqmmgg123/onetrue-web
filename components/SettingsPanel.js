@@ -49,7 +49,7 @@ export default function SettingsPanel({ toast }) {
 
   return (
     <div className="panel">
-      <h2>我的</h2>
+      <h2>账号设置</h2>
       <p className="hint">
         {profile?.displayName || "用户"}
         {user?.email ? ` · ${user.email}` : ""}
@@ -119,9 +119,9 @@ export default function SettingsPanel({ toast }) {
 
       <div className="settings-list" style={{ marginTop: 28 }}>
         {download ? (
-          <a href={download} target="_blank" rel="noreferrer">
+          <a href="/download">
             <span>{appDownloadHint()}</span>
-            <span className="sub">下载</span>
+            <span className="sub">下载页</span>
           </a>
         ) : null}
         <button

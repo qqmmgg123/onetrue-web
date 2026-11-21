@@ -31,11 +31,16 @@ const QuillEditorField = forwardRef(function QuillEditorField(
   },
   ref,
 ) {
+  const hostRef = useRef(null);
   const editorRef = useRef(null);
   const quillRef = useRef(null);
   const onChangeRef = useRef(onChange);
   const seedRef = useRef({ body, format });
+  const readOnlyRef = useRef(readOnly);
+  /** imperative 写入后跳过下一次 body prop 同步，避免 AI 连续改写被旧 seed 打回 */
+  const skipSeedSyncRef = useRef(0);
   onChangeRef.current = onChange;
+  readOnlyRef.current = readOnly;
 
   useImperativeHandle(ref, () => ({
     getPlain() {
@@ -59,19 +64,34 @@ const QuillEditorField = forwardRef(function QuillEditorField(
       emitChange(q, onChangeRef.current);
     },
     replacePlain(plain) {
-      const q = quillRef.current;
-      if (!q) return;
       const text = String(plain || "");
       const withNl = text.endsWith("\n") ? text : `${text}\n`;
-      q.setContents({ ops: [{ insert: withNl }] }, "user");
-      emitChange(q, onChangeRef.current);
+      const ops = [{ insert: withNl }];
+      const q = quillRef.current;
+      if (q) {
+        skipSeedSyncRef.current += 1;
+        q.setContents(ops, "user");
+        emitChange(q, onChangeRef.current);
+      }
+      return ops;
+    },
+    appendPlain(plain) {
+      const add = String(plain || "").replace(/\n+$/, "").trim();
+      if (!add) return this.getOps?.() || [{ insert: "\n" }];
+      const cur = this.getPlain?.() || "";
+      const next = cur.trim() ? `${cur.trim()}\n${add}` : add;
+      return this.replacePlain(next);
     },
     replaceDelta(delta) {
+      const opsIn = Array.isArray(delta) ? delta : delta?.ops || [];
+      const ops = opsIn.length ? opsIn : [{ insert: "\n" }];
       const q = quillRef.current;
-      if (!q) return;
-      const ops = Array.isArray(delta) ? delta : delta?.ops || [];
-      q.setContents({ ops: ops.length ? ops : [{ insert: "\n" }] }, "user");
-      emitChange(q, onChangeRef.current);
+      if (q) {
+        skipSeedSyncRef.current += 1;
+        q.setContents(ops, "user");
+        emitChange(q, onChangeRef.current);
+      }
+      return ops;
     },
     applyFormat(ops = {}) {
       const q = quillRef.current;
@@ -100,7 +120,11 @@ const QuillEditorField = forwardRef(function QuillEditorField(
       }
       if (ops.align === "left" || ops.align === "") {
         q.formatLine(range.index, range.length, "align", false);
-      } else if (ops.align === "center" || ops.align === "right" || ops.align === "justify") {
+      } else if (
+        ops.align === "center" ||
+        ops.align === "right" ||
+        ops.align === "justify"
+      ) {
         q.formatLine(range.index, range.length, "align", ops.align);
       }
       if (ops.size) {
@@ -110,6 +134,7 @@ const QuillEditorField = forwardRef(function QuillEditorField(
     },
   }));
 
+  // 只初始化一次；readOnly 切换只用 enable，避免 snow 工具栏重复挂载
   useEffect(() => {
     let cancelled = false;
     let q = null;
@@ -124,17 +149,18 @@ const QuillEditorField = forwardRef(function QuillEditorField(
       q = new Quill(editorRef.current, {
         theme: "snow",
         placeholder,
-        readOnly: Boolean(readOnly),
+        readOnly: Boolean(readOnlyRef.current),
         modules: {
-          toolbar: readOnly ? false : TOOLBAR,
+          toolbar: TOOLBAR,
         },
       });
       const ops = deltaOpsFromBody(seedRef.current.body, seedRef.current.format);
-      q.setContents({ ops }, "silent");
+      q.setContents(ops, "silent");
       q.on("text-change", (_delta, _old, source) => {
         if (source !== "user") return;
         emitChange(q, onChangeRef.current);
       });
+      if (readOnlyRef.current) q.enable(false);
       quillRef.current = q;
     })();
 
@@ -142,8 +168,16 @@ const QuillEditorField = forwardRef(function QuillEditorField(
       cancelled = true;
       quillRef.current = null;
       q = null;
+      // Quill snow 会在容器旁插入 .ql-toolbar；整宿主清空，避免残留双栏
+      if (hostRef.current) {
+        hostRef.current.innerHTML = "";
+        const ed = document.createElement("div");
+        editorRef.current = ed;
+        hostRef.current.appendChild(ed);
+      }
     };
-  }, [placeholder, readOnly]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载一次
+  }, []);
 
   useEffect(() => {
     const q = quillRef.current;
@@ -157,16 +191,22 @@ const QuillEditorField = forwardRef(function QuillEditorField(
     const prev = seedRef.current;
     if (prev.body === body && prev.format === format) return;
     seedRef.current = { body, format };
+    if (skipSeedSyncRef.current > 0) {
+      skipSeedSyncRef.current -= 1;
+      return;
+    }
     const ops = deltaOpsFromBody(body, format);
     const cur = JSON.stringify(q.getContents()?.ops || []);
     const next = JSON.stringify(ops);
     if (cur !== next) {
-      q.setContents({ ops }, "silent");
+      q.setContents(ops, "silent");
+      emitChange(q, onChangeRef.current);
     }
   }, [body, format]);
 
   return (
     <div
+      ref={hostRef}
       className={`quill-host${readOnly ? " quill-host-ro" : ""}`}
       style={{ ["--quill-min-h"]: `${minHeight}px` }}
     >

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   addComment,
+  deleteNote,
   fetchProfiles,
   fetchSocialStatus,
   incrementArticleView,
@@ -28,6 +29,7 @@ export default function ArticleReader({
   onNeedLogin,
   onOpenAuthor,
   onEdit,
+  onDeleted,
   onReadRecorded,
   toast,
 }) {
@@ -204,6 +206,25 @@ export default function ArticleReader({
         {isMine && onEdit ? (
           <button className="btn ghost" onClick={onEdit}>
             编辑
+          </button>
+        ) : null}
+        {isMine ? (
+          <button
+            className="btn ghost"
+            disabled={busy}
+            onClick={() =>
+              guard(async () => {
+                const name = displayTitle(article.title, article.body, "文章");
+                if (!window.confirm(`确认删除「${name}」？删除后无法恢复。`)) {
+                  return;
+                }
+                await deleteNote(article.id);
+                toast?.("已删除");
+                onDeleted?.(article);
+              })
+            }
+          >
+            删除
           </button>
         ) : null}
       </div>
