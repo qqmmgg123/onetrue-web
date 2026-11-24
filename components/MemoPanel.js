@@ -5,14 +5,33 @@ import { deleteNote, updateNote } from "../lib/api";
 import { displayTitle, excerpt, formatWhen } from "../lib/format";
 import QuillBodyView from "./QuillBodyView";
 
+/** 与 App memo_sort 对齐 */
+function memoGroup(n) {
+  if (n.completedAt) return 2;
+  if (n.pinnedAt) return 0;
+  return 1;
+}
+
 function sortMemos(notes) {
   return (notes || [])
     .filter((n) => n.kind === "memo")
     .slice()
     .sort((a, b) => {
-      const so = (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
-      if (so !== 0) return so;
-      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+      const ga = memoGroup(a);
+      const gb = memoGroup(b);
+      if (ga !== gb) return ga - gb;
+      if (ga === 0) {
+        const c = String(b.pinnedAt || "").localeCompare(String(a.pinnedAt || ""));
+        if (c) return c;
+      } else if (ga === 2) {
+        const c = String(a.completedAt || "").localeCompare(
+          String(b.completedAt || ""),
+        );
+        if (c) return c;
+      }
+      const u = String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+      if (u) return u;
+      return String(b.id || "").localeCompare(String(a.id || ""));
     });
 }
 
@@ -32,9 +51,8 @@ export default function MemoPanel({
 }) {
   const [detail, setDetail] = useState(null);
   const [busyId, setBusyId] = useState("");
+  const [modalBusy, setModalBusy] = useState("");
   const [ordered, setOrdered] = useState(() => sortMemos(notes));
-  const [dragId, setDragId] = useState("");
-  const [savingOrder, setSavingOrder] = useState(false);
   const [menuId, setMenuId] = useState("");
   const menuRef = useRef(null);
 
@@ -53,6 +71,16 @@ export default function MemoPanel({
 
   const list = useMemo(() => ordered, [ordered]);
 
+  async function withModalBusy(message, fn) {
+    setModalBusy(message);
+    try {
+      await fn();
+      await onChanged?.();
+    } finally {
+      setModalBusy("");
+    }
+  }
+
   async function confirmDelete(n) {
     if (!n?.id) return;
     const title = displayTitle(n.title, n.body, "备忘", n.format);
@@ -60,10 +88,11 @@ export default function MemoPanel({
     setBusyId(n.id);
     setMenuId("");
     try {
-      await deleteNote(n.id);
-      if (detail?.id === n.id) setDetail(null);
-      toast?.("已删除");
-      await onChanged?.();
+      await withModalBusy("正在删除…", async () => {
+        await deleteNote(n.id);
+        if (detail?.id === n.id) setDetail(null);
+        toast?.("已删除");
+      });
     } catch (e) {
       toast?.(e.message || "删除失败");
     } finally {
@@ -71,36 +100,37 @@ export default function MemoPanel({
     }
   }
 
-  function openAdd() {
-    if (!isLoggedIn) return onNeedLogin?.();
-    onCompose?.({ kind: "memo" });
-  }
-
-  async function persistOrder(next) {
-    setSavingOrder(true);
+  async function togglePin(n) {
+    const pinned = Boolean(n.pinnedAt);
     try {
-      await Promise.all(next.map((n, i) => updateNote(n.id, { sortOrder: i })));
-      setOrdered(next.map((n, i) => ({ ...n, sortOrder: i })));
-      toast?.("已调整顺序");
-      await onChanged?.();
+      await withModalBusy(pinned ? "取消置顶…" : "置顶中…", async () => {
+        await updateNote(n.id, {
+          pinnedAt: pinned ? null : new Date().toISOString(),
+        });
+        toast?.(pinned ? "已取消置顶" : "已置顶");
+      });
     } catch (e) {
-      toast?.(e.message || "排序失败");
-      setOrdered(sortMemos(notes));
-    } finally {
-      setSavingOrder(false);
+      toast?.(e.message || "操作失败");
     }
   }
 
-  function onDropTarget(targetId) {
-    if (!dragId || dragId === targetId || savingOrder) return;
-    const from = list.findIndex((n) => n.id === dragId);
-    const to = list.findIndex((n) => n.id === targetId);
-    if (from < 0 || to < 0 || from === to) return;
-    const next = list.slice();
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    setOrdered(next);
-    persistOrder(next);
+  async function toggleDone(n) {
+    const done = Boolean(n.completedAt);
+    try {
+      await withModalBusy(done ? "取消办结…" : "办结中…", async () => {
+        await updateNote(n.id, {
+          completedAt: done ? null : new Date().toISOString(),
+        });
+        toast?.(done ? "已恢复" : "已办结");
+      });
+    } catch (e) {
+      toast?.(e.message || "操作失败");
+    }
+  }
+
+  function openAdd() {
+    if (!isLoggedIn) return onNeedLogin?.();
+    onCompose?.({ kind: "memo" });
   }
 
   if (loading) {
@@ -124,8 +154,15 @@ export default function MemoPanel({
 
   return (
     <div className="memo-grid-wrap">
-      <p className="memo-sort-hint">长按或拖拽卡片可排序</p>
-      <div className="memo-feed-grid">
+      {modalBusy ? (
+        <div className="memo-busy-backdrop" role="alert" aria-busy="true">
+          <div className="memo-busy-dialog">
+            <div className="memo-busy-spinner" />
+            <span>{modalBusy}</span>
+          </div>
+        </div>
+      ) : null}
+      <div className="memo-feed-grid memo-feed-list">
         <button
           type="button"
           className="memo-feed-card memo-feed-add"
@@ -138,28 +175,12 @@ export default function MemoPanel({
         </button>
         {list.map((n) => {
           const title = displayTitle(n.title, n.body, "备忘", n.format);
+          const done = Boolean(n.completedAt);
+          const pinned = Boolean(n.pinnedAt);
           return (
             <div
               key={n.id}
-              className={`memo-feed-card${dragId === n.id ? " dragging" : ""}`}
-              draggable={!savingOrder}
-              onDragStart={(e) => {
-                setDragId(n.id);
-                e.dataTransfer.effectAllowed = "move";
-                try {
-                  e.dataTransfer.setData("text/plain", n.id);
-                } catch (_) {}
-              }}
-              onDragEnd={() => setDragId("")}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                onDropTarget(n.id);
-                setDragId("");
-              }}
+              className={`memo-feed-card${done ? " is-done" : ""}${pinned ? " is-pinned" : ""}`}
             >
               <div className="memo-feed-card-top">
                 <button
@@ -167,10 +188,11 @@ export default function MemoPanel({
                   className="memo-feed-card-main"
                   onClick={() => setDetail(n)}
                 >
-                  <div className="card-title">{title}</div>
-                  <div className="card-excerpt">{memoExcerpt(n)}</div>
-                  <div className="card-foot">
-                    <span>{formatWhen(n.updatedAt)}</span>
+                  <div className={`card-title${done ? " struck" : ""}`}>
+                    {title}
+                  </div>
+                  <div className={`card-excerpt${done ? " struck" : ""}`}>
+                    {memoExcerpt(n)}
                   </div>
                 </button>
                 <div
@@ -191,17 +213,19 @@ export default function MemoPanel({
                   </button>
                   {menuId === n.id ? (
                     <div className="memo-card-menu" role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setMenuId("");
-                          onEdit?.(n);
-                        }}
-                      >
-                        编辑
-                      </button>
+                      {!done ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuId("");
+                            onEdit?.(n);
+                          }}
+                        >
+                          编辑
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         role="menuitem"
@@ -215,6 +239,34 @@ export default function MemoPanel({
                       </button>
                     </div>
                   ) : null}
+                </div>
+              </div>
+              <div className="memo-card-foot-row">
+                <span className="card-foot">{formatWhen(n.updatedAt)}</span>
+                <div className="memo-card-actions">
+                  <button
+                    type="button"
+                    className={`memo-pin-btn${pinned ? " on" : ""}`}
+                    title={pinned ? "取消置顶" : "置顶"}
+                    aria-label={pinned ? "取消置顶" : "置顶"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      togglePin(n);
+                    }}
+                  >
+                    {pinned ? "📌" : "📍"}
+                  </button>
+                  <label
+                    className="memo-done-check"
+                    title={done ? "取消办结" : "办结"}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={done}
+                      onChange={() => toggleDone(n)}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
@@ -248,16 +300,18 @@ export default function MemoPanel({
                 关闭
               </button>
               <div style={{ flex: 1 }} />
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => {
-                  setDetail(null);
-                  onEdit?.(detailNote);
-                }}
-              >
-                编辑
-              </button>
+              {!detailNote.completedAt ? (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => {
+                    setDetail(null);
+                    onEdit?.(detailNote);
+                  }}
+                >
+                  编辑
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btn ghost"

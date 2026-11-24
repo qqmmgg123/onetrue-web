@@ -1623,32 +1623,29 @@ button.hub-row {
 
 .memo-grid-wrap {
   padding: 12px 16px 32px;
+  position: relative;
 }
 
-.memo-sort-hint {
-  margin: 0 0 10px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* ??????? feed ???? cover / ?????????? */
-.memo-feed-grid {
+.memo-feed-grid,
+.memo-feed-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 16px;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  max-width: 720px;
 }
 
 .memo-feed-card {
   position: relative;
   background: var(--bg);
   border: 1px solid var(--line);
+  border-radius: 12px;
   text-align: left;
   display: flex;
   flex-direction: column;
   transition: border-color 0.15s, background 0.15s;
   overflow: visible;
-  min-height: 140px;
-  cursor: grab;
+  min-height: 0;
+  cursor: default;
 }
 
 .memo-feed-card:hover {
@@ -1656,9 +1653,14 @@ button.hub-row {
   background: var(--surface);
 }
 
-.memo-feed-card.dragging {
-  opacity: 0.55;
-  cursor: grabbing;
+.memo-feed-card.is-done {
+  background: #f3f3f3;
+  color: #9a9a9a;
+  border-color: #e5e5e5;
+}
+
+.memo-feed-card.is-done:hover {
+  background: #f0f0f0;
 }
 
 .memo-feed-add {
@@ -1706,7 +1708,7 @@ button.hub-row {
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 12px;
+  padding: 12px 12px 4px;
   cursor: pointer;
   color: inherit;
   font: inherit;
@@ -1735,10 +1737,99 @@ button.hub-row {
   line-height: 1.5;
 }
 
+.memo-feed-card .card-title.struck,
+.memo-feed-card .card-excerpt.struck {
+  text-decoration: line-through;
+}
+
 .memo-feed-card .card-foot {
-  margin-top: auto;
   font-size: 12px;
   color: var(--muted);
+}
+
+.memo-card-foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 8px 12px;
+}
+
+.memo-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.memo-pin-btn {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.55;
+}
+
+.memo-pin-btn.on {
+  opacity: 1;
+}
+
+.memo-pin-btn:hover {
+  background: var(--hover);
+}
+
+.memo-done-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+}
+
+.memo-done-check input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.memo-busy-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.memo-busy-dialog {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px 22px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
+  font-size: 14px;
+}
+
+.memo-busy-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid #ddd;
+  border-top-color: #111;
+  border-radius: 50%;
+  animation: memo-spin 0.7s linear infinite;
+}
+
+@keyframes memo-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .memo-card-more-wrap {
@@ -1844,19 +1935,6 @@ button.hub-row {
 .memo-modal-body .quill-body-view .ql-editor {
   font-size: 16px;
   line-height: 1.75;
-}
-
-@media (max-width: 860px) {
-  .memo-feed-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-}
-
-@media (max-width: 420px) {
-  .memo-feed-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .cal-narrow .cal-head {
@@ -2792,6 +2870,35 @@ button.hub-row {
   z-index: 1;
   font-size: 12px;
   color: #6b6b6b;
+}
+
+.feed-card .feed-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.feed-card .cover:not(.has-image) .feed-remove {
+  background: rgba(0, 0, 0, 0.12);
+  color: #333;
+}
+
+.feed-card .feed-remove:hover {
+  background: rgba(0, 0, 0, 0.7);
 }
 
 .feed-card .cover.has-image .cover-city {

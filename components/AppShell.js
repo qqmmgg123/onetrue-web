@@ -11,11 +11,14 @@ import {
   fetchMyReads,
   fetchNotifications,
   fetchProfiles,
+  removeMyRead,
+  toggleFavorite,
 } from "../lib/api";
 import { displayTitle, excerpt, formatWhen, snippet } from "../lib/format";
 import {
   listArticleReads,
   readsToArticle,
+  removeArticleReadLocal,
   replaceUserArticleReadsCache,
 } from "../lib/recent-reads";
 import { articleSharePath } from "../lib/site";
@@ -783,35 +786,39 @@ export default function AppShell({
       return <div className="panel-loading">加载中…</div>;
     }
     if (exploreTab === "reads") {
+      const readArticles = recentReads
+        .map(readsToArticle)
+        .filter(Boolean);
+      const lastReadById = {};
+      for (const r of recentReads) lastReadById[r.id] = r.lastReadAt;
       return (
-        <div className="hub-main-list">
-          {recentReads.length === 0 ? (
-            <div className="empty">还没有阅读记录。去「推荐的文章」点开后会出现在这里。</div>
-          ) : (
-            recentReads.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                className="list-item"
-                onClick={() => {
-                  const a = readsToArticle(r);
-                  if (a) openArticle(a);
-                }}
-              >
-                <UserAvatar
-                  profile={profiles[r.ownerId] || { displayName: "读" }}
-                />
-                <div>
-                  <div className="title">
-                    {displayTitle(r.title, r.body)}
-                  </div>
-                  <div className="meta">{snippet(r.title, r.body, 40)}</div>
-                </div>
-                <div className="time">{formatWhen(r.lastReadAt)}</div>
-              </button>
-            ))
-          )}
-        </div>
+        <ArticleFeed
+          articles={readArticles}
+          profiles={profiles}
+          selectedId={selected?.id}
+          onSelect={openArticle}
+          removeTitle="移除记录"
+          footTimeOf={(a) => lastReadById[a.id]}
+          emptyText="还没有阅读记录。去「推荐的文章」点开后会出现在这里。"
+          onRemove={async (a) => {
+            if (!isLoggedIn) return needLogin();
+            if (
+              !window.confirm(
+                `将「${displayTitle(a.title, a.body)}」从近期阅读中移除？`,
+              )
+            ) {
+              return;
+            }
+            try {
+              await removeMyRead(a.id);
+              removeArticleReadLocal(a.id, user?.id || "");
+              setRecentReads((prev) => prev.filter((r) => r.id !== a.id));
+              showToast("已移除");
+            } catch (e) {
+              showToast(e.message || "移除失败");
+            }
+          }}
+        />
       );
     }
     if (exploreTab === "fav") {
@@ -821,7 +828,25 @@ export default function AppShell({
           profiles={profiles}
           selectedId={selected?.id}
           onSelect={openArticle}
+          removeTitle="取消收藏"
           emptyText="还没有收藏"
+          onRemove={async (a) => {
+            if (!isLoggedIn) return needLogin();
+            if (
+              !window.confirm(
+                `将「${displayTitle(a.title, a.body)}」从收藏中移除？`,
+              )
+            ) {
+              return;
+            }
+            try {
+              await toggleFavorite(a.id);
+              setFavorites((prev) => prev.filter((x) => x.id !== a.id));
+              showToast("已移除");
+            } catch (e) {
+              showToast(e.message || "移除失败");
+            }
+          }}
         />
       );
     }

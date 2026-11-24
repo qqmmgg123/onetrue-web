@@ -72,6 +72,22 @@ export async function PATCH(request, { params }) {
       const so = Number(body.sortOrder ?? body.sort_order);
       if (Number.isFinite(so)) patch.sort_order = Math.trunc(so);
     }
+    if (body.pinnedAt !== undefined || body.pinned_at !== undefined) {
+      const raw = body.pinnedAt ?? body.pinned_at;
+      if (raw === null || raw === "") patch.pinned_at = null;
+      else {
+        const d = new Date(raw);
+        patch.pinned_at = Number.isNaN(d.getTime()) ? null : d.toISOString();
+      }
+    }
+    if (body.completedAt !== undefined || body.completed_at !== undefined) {
+      const raw = body.completedAt ?? body.completed_at;
+      if (raw === null || raw === "") patch.completed_at = null;
+      else {
+        const d = new Date(raw);
+        patch.completed_at = Number.isNaN(d.getTime()) ? null : d.toISOString();
+      }
+    }
 
     const nextKind = patch.kind || cur.kind;
     if (nextKind === "admonition" || cur.kind === "admonition") {

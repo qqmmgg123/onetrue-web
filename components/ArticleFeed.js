@@ -9,7 +9,10 @@ export default function ArticleFeed({
   profiles,
   selectedId,
   onSelect,
+  onRemove,
+  removeTitle = "移除",
   emptyText = "暂无文章",
+  footTimeOf,
 }) {
   if (!articles?.length) {
     return <div className="empty">{emptyText}</div>;
@@ -20,12 +23,20 @@ export default function ArticleFeed({
         const author = profiles?.[a.ownerId];
         const title = displayTitle(a.title, a.body);
         const cover = String(a.coverUrl || "").trim();
+        const footTime = footTimeOf?.(a) || a.listedAt;
         return (
-          <button
+          <div
             key={a.id}
-            type="button"
             className={`feed-card ${selectedId === a.id ? "active" : ""}`}
+            role="button"
+            tabIndex={0}
             onClick={() => onSelect?.(a)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect?.(a);
+              }
+            }}
           >
             <div className={`cover${cover ? " has-image" : ""}`}>
               {cover ? (
@@ -37,6 +48,20 @@ export default function ArticleFeed({
                 />
               ) : null}
               <span className="cover-city">{a.city || "醍醐"}</span>
+              {onRemove ? (
+                <button
+                  type="button"
+                  className="feed-remove"
+                  title={removeTitle}
+                  aria-label={removeTitle}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(a);
+                  }}
+                >
+                  ×
+                </button>
+              ) : null}
             </div>
             <div className="body">
               <div className="card-title">{title}</div>
@@ -54,11 +79,11 @@ export default function ArticleFeed({
                 </span>
                 <span>
                   ♥ {a.recommendCount || 0}
-                  {a.listedAt ? ` · ${formatWhen(a.listedAt)}` : ""}
+                  {footTime ? ` · ${formatWhen(footTime)}` : ""}
                 </span>
               </div>
             </div>
-          </button>
+          </div>
         );
       })}
     </div>
