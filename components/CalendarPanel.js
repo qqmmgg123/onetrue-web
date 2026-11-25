@@ -7,6 +7,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CAL_EVENT_GUTTER_PX,
+  calendarTimeFromY,
+  layoutCalendarEvents,
+} from "../lib/calendar-layout";
 import { displayTitle, formatWhen } from "../lib/format";
 import { expandOccurrences } from "../lib/note-recur";
 
@@ -104,12 +109,143 @@ function useLongPress(onLong, ms = 450) {
   };
 }
 
-function DayColumn({ day, events, onTapSlot, onLongPressSlot, onTapNote }) {
+function EventChip({ laid, onTapNote, onMoveNote }) {
+  const { data, startMin, endMin, leftFrac, widthFrac } = laid;
+  const { note, at } = data;
+  const chipRef = useRef(null);
+  const drag = useRef(null);
+  const [offset, setOffset] = useState(null);
+  const [dragging, setDragging] = useState(false);
+
+  const top = (startMin / 60 - HOUR_START) * ROW_H;
+  const height = Math.max(22, ((endMin - startMin) / 60) * ROW_H - 4);
+  const gutter = CAL_EVENT_GUTTER_PX;
+
+  const style = {
+    top,
+    height,
+    left: `calc((100% - ${gutter}px) * ${leftFrac} + 2px)`,
+    width: `calc((100% - ${gutter}px) * ${widthFrac} - 4px)`,
+    right: "auto",
+    ...(offset
+      ? {
+          transform: `translate(${offset.dx}px, ${offset.dy}px)`,
+          zIndex: 20,
+          opacity: 0.9,
+          pointerEvents: "none",
+        }
+      : null),
+  };
+
+  function endDrag(e) {
+    const s = drag.current;
+    drag.current = null;
+    setOffset(null);
+    setDragging(false);
+    if (!s?.moved) return;
+    const cols = document.querySelectorAll(".cal-day-col[data-day]");
+    let targetDay = null;
+    let localY = 0;
+    for (const col of cols) {
+      const r = col.getBoundingClientRect();
+      if (
+        e.clientX >= r.left &&
+        e.clientX < r.right &&
+        e.clientY >= r.top &&
+        e.clientY < r.bottom
+      ) {
+        const raw = col.getAttribute("data-day");
+        targetDay = raw ? new Date(raw) : null;
+        localY = e.clientY - r.top;
+        break;
+      }
+    }
+    if (!targetDay || Number.isNaN(targetDay.getTime())) return;
+    const toAt = calendarTimeFromY({
+      day: targetDay,
+      localY,
+      rowH: ROW_H,
+      hourStart: HOUR_START,
+      hourEnd: HOUR_END,
+    });
+    onMoveNote?.(note, at, toAt);
+  }
+
+  return (
+    <button
+      ref={chipRef}
+      type="button"
+      className={`cal-event-chip${dragging ? " dragging" : ""}`}
+      style={style}
+      title={displayTitle(note.title, note.body)}
+      onPointerDown={(e) => {
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        drag.current = {
+          x: e.clientX,
+          y: e.clientY,
+          moved: false,
+        };
+      }}
+      onPointerMove={(e) => {
+        const s = drag.current;
+        if (!s) return;
+        const dx = e.clientX - s.x;
+        const dy = e.clientY - s.y;
+        if (!s.moved && dx * dx + dy * dy < 36) return;
+        if (!s.moved) {
+          s.moved = true;
+          setDragging(true);
+        }
+        setOffset({ dx, dy });
+      }}
+      onPointerUp={(e) => {
+        const s = drag.current;
+        if (!s) return;
+        if (!s.moved) {
+          drag.current = null;
+          e.stopPropagation();
+          onTapNote?.(note);
+          return;
+        }
+        endDrag(e);
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+        setOffset(null);
+        setDragging(false);
+      }}
+      onClick={(e) => {
+        // 点击由 pointerUp 处理，避免拖完再触发
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      {displayTitle(note.title, note.body)}
+    </button>
+  );
+}
+
+function DayColumn({
+  day,
+  events,
+  onTapSlot,
+  onLongPressSlot,
+  onTapNote,
+  onMoveNote,
+}) {
   const hours = [];
   for (let h = HOUR_START; h <= HOUR_END; h++) hours.push(h);
 
+  const visible = (events || []).filter(
+    ({ at }) => at.getHours() >= HOUR_START && at.getHours() <= HOUR_END,
+  );
+  const laid = layoutCalendarEvents(visible, {
+    startMinuteOf: (e) => e.at.getHours() * 60 + e.at.getMinutes(),
+  });
+
   return (
-    <div className="cal-day-col">
+    <div className="cal-day-col" data-day={day.toISOString()}>
       {hours.map((h) => (
         <HourCell
           key={h}
@@ -119,27 +255,14 @@ function DayColumn({ day, events, onTapSlot, onLongPressSlot, onTapNote }) {
           onLongPressSlot={onLongPressSlot}
         />
       ))}
-      {events.map(({ note, at }) => {
-        if (at.getHours() < HOUR_START || at.getHours() > HOUR_END) return null;
-        const top =
-          (at.getHours() - HOUR_START) * ROW_H +
-          (at.getMinutes() / 60) * ROW_H;
-        return (
-          <button
-            key={`${note.id}-${at.getTime()}`}
-            type="button"
-            className="cal-event-chip"
-            style={{ top, height: ROW_H - 4 }}
-            title={displayTitle(note.title, note.body)}
-            onClick={(e) => {
-              e.stopPropagation();
-              onTapNote?.(note);
-            }}
-          >
-            {displayTitle(note.title, note.body)}
-          </button>
-        );
-      })}
+      {laid.map((item) => (
+        <EventChip
+          key={`${item.data.note.id}-${item.data.at.getTime()}`}
+          laid={item}
+          onTapNote={onTapNote}
+          onMoveNote={onMoveNote}
+        />
+      ))}
     </div>
   );
 }
@@ -172,6 +295,7 @@ function WeekTimeline({
   onTapSlot,
   onLongPressSlot,
   onTapNote,
+  onMoveNote,
 }) {
   const hours = [];
   for (let h = HOUR_START; h <= HOUR_END; h++) hours.push(h);
@@ -214,6 +338,7 @@ function WeekTimeline({
               onTapSlot={onTapSlot}
               onLongPressSlot={onLongPressSlot}
               onTapNote={onTapNote}
+              onMoveNote={onMoveNote}
             />
           ))}
         </div>
@@ -380,6 +505,7 @@ export default function CalendarPanel({
   onSelect,
   onOpenNote,
   onCreateSchedule,
+  onMoveNote,
 }) {
   const today = useMemo(() => dateOnly(new Date()), []);
   const controlled = selectedProp != null && typeof onSelect === "function";
@@ -449,6 +575,16 @@ export default function CalendarPanel({
     [onCreateSchedule, setSelected],
   );
 
+  const handleMoveNote = useCallback(
+    (note, fromAt, toAt) => {
+      if (!note || !toAt) return;
+      if (fromAt && toAt.getTime() === fromAt.getTime()) return;
+      setSelected(dateOnly(toAt));
+      onMoveNote?.(note, fromAt, toAt);
+    },
+    [onMoveNote, setSelected],
+  );
+
   function shiftRange(dir) {
     const step = dayCount * dir;
     if (narrow) {
@@ -487,8 +623,8 @@ export default function CalendarPanel({
 
       <p className="cal-hint">
         {narrow
-          ? "左右换三日；点空白时段安排日常。"
-          : "左右换周；点空白时段安排日常。"}
+          ? "左右换三日；点空白叠卡；拖拽卡片改时间。"
+          : "左右换周；点空白叠卡；拖拽卡片改时间。"}
       </p>
 
       <WeekTimeline
@@ -500,6 +636,7 @@ export default function CalendarPanel({
         onTapSlot={onTapSlot}
         onLongPressSlot={onLongPressSlot}
         onTapNote={onOpenNote}
+        onMoveNote={handleMoveNote}
       />
     </div>
   );

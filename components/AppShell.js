@@ -12,7 +12,9 @@ import {
   fetchNotifications,
   fetchProfiles,
   removeMyRead,
+  removeNotification,
   toggleFavorite,
+  updateNote,
 } from "../lib/api";
 import { displayTitle, excerpt, formatWhen, snippet } from "../lib/format";
 import {
@@ -868,43 +870,70 @@ export default function AppShell({
             <div className="empty">暂无留言或回复</div>
           ) : (
             notices.map((n) => (
-              <button
-                key={n.id}
-                type="button"
-                className="hub-row"
-                onClick={async () => {
-                  if (!n.noteId) return;
-                  try {
-                    const list = await fetchListedArticles();
-                    const a = list.find((x) => x.id === n.noteId);
-                    if (a) {
-                      openArticle(a, {
-                        highlightCommentId: n.commentId || "",
-                      });
-                    } else showToast("文章可能已删除");
-                  } catch (e) {
-                    showToast(e.message || "打开失败");
-                  }
-                }}
-              >
-                <div className="row-top">
-                  <span className="label">
-                    {n.actor?.displayName || "有人"}
-                  </span>
-                  <span className="action">{formatWhen(n.createdAt)}</span>
-                </div>
-                <div className="summary">
-                  {n.kind === "follow"
-                    ? "留意了你"
-                    : n.kind === "recommend"
-                      ? "推荐了你的文章"
-                      : n.kind === "reply"
-                        ? "回复了你"
-                        : n.kind === "comment"
-                          ? "留言了你的文章"
-                          : n.body || n.kind}
-                </div>
-              </button>
+              <div key={n.id} className="hub-row">
+                <button
+                  type="button"
+                  className="hub-row-main"
+                  onClick={async () => {
+                    if (!n.noteId) return;
+                    try {
+                      const list = await fetchListedArticles();
+                      const a = list.find((x) => x.id === n.noteId);
+                      if (a) {
+                        openArticle(a, {
+                          highlightCommentId: n.commentId || "",
+                        });
+                      } else showToast("文章可能已删除");
+                    } catch (e) {
+                      showToast(e.message || "打开失败");
+                    }
+                  }}
+                >
+                  <div className="row-top">
+                    <span className="label">
+                      {n.actor?.displayName || "有人"}
+                    </span>
+                    <span className="action">{formatWhen(n.createdAt)}</span>
+                  </div>
+                  <div className="summary">
+                    {n.kind === "follow"
+                      ? "留意了你"
+                      : n.kind === "recommend"
+                        ? "推荐了你的文章"
+                        : n.kind === "reply"
+                          ? "回书了你"
+                          : n.kind === "comment"
+                            ? "给你的文章留了言"
+                            : n.body || n.kind}
+                    {n.noteTitle ? ` · ${n.noteTitle}` : ""}
+                    {n.body &&
+                    (n.kind === "comment" || n.kind === "reply")
+                      ? `：${n.body}`
+                      : ""}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="hub-row-delete"
+                  title="移除"
+                  aria-label="移除"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm("将这条提醒从留言与回复中移除？")) {
+                      return;
+                    }
+                    try {
+                      await removeNotification(n.id);
+                      setNotices((prev) => prev.filter((x) => x.id !== n.id));
+                      showToast("已移除");
+                    } catch (err) {
+                      showToast(err.message || "移除失败");
+                    }
+                  }}
+                >
+                  移除
+                </button>
+              </div>
             ))
           )}
         </div>
@@ -1100,6 +1129,17 @@ export default function AppShell({
 
             {nav === "other" ? (
               <>
+                <HubRow
+                  title="下载 App"
+                  summary=""
+                  action=""
+                  active={false}
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      window.location.href = "/download";
+                    }
+                  }}
+                />
                 <HubRow
                   title="联系反馈"
                   summary=""
@@ -1336,6 +1376,29 @@ export default function AppShell({
                   scheduleAt: iso,
                   kind: "schedule",
                 });
+              }}
+              onMoveNote={async (note, fromAt, toAt) => {
+                if (!isLoggedIn) return needLogin();
+                if (!note?.id || !toAt) return;
+                const base = note.scheduleAt
+                  ? new Date(note.scheduleAt)
+                  : fromAt
+                    ? new Date(fromAt)
+                    : null;
+                if (!base || Number.isNaN(base.getTime())) return;
+                const from = fromAt ? new Date(fromAt) : base;
+                const delta = toAt.getTime() - from.getTime();
+                if (!delta) return;
+                const next = new Date(base.getTime() + delta);
+                try {
+                  await updateNote(note.id, {
+                    scheduleAt: next.toISOString(),
+                  });
+                  await refreshHub().catch(() => {});
+                  showToast?.("已移动日常");
+                } catch (err) {
+                  showToast?.(err?.message || "移动失败");
+                }
               }}
             />
           ) : nav === "explore" ? (

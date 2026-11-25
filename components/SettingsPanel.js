@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uploadMyAvatar, upsertMyProfile } from "../lib/api";
-import { appDownloadHint, appDownloadUrl } from "../lib/site";
+import { appDownloadHint } from "../lib/site";
 import AvatarCropModal from "./AvatarCropModal";
 import { useAuth } from "./AuthProvider";
 import AuthPanel from "./AuthPanel";
@@ -29,8 +29,6 @@ export default function SettingsPanel({ toast }) {
   if (!isLoggedIn) {
     return <AuthPanel />;
   }
-
-  const download = appDownloadUrl();
 
   async function uploadCropped(file) {
     setCropFile(null);
@@ -118,12 +116,10 @@ export default function SettingsPanel({ toast }) {
       </button>
 
       <div className="settings-list" style={{ marginTop: 28 }}>
-        {download ? (
-          <a href="/download">
-            <span>{appDownloadHint()}</span>
-            <span className="sub">下载页</span>
-          </a>
-        ) : null}
+        <a href="/download">
+          <span>{appDownloadHint()}</span>
+          <span className="sub">下载页</span>
+        </a>
         <button
           type="button"
           onClick={async () => {

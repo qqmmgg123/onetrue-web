@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchMyFeedback, submitFeedback } from "../lib/api";
 import { formatWhen } from "../lib/format";
-import { appDownloadHint, appDownloadUrl } from "../lib/site";
+import { appDownloadHint } from "../lib/site";
 import { useAuth } from "./AuthProvider";
 
-const SUPPORT_EMAIL = "support@tihu.app";
+const SUPPORT_EMAIL = "290448666@qq.com";
 
 /** 联系与反馈（其他 → 第二项） */
 export default function SupportPanel({ toast }) {
@@ -17,8 +17,6 @@ export default function SupportPanel({ toast }) {
   const [body, setBody] = useState("");
   const [contact, setContact] = useState("");
   const [busy, setBusy] = useState(false);
-  const download = appDownloadUrl();
-
   const load = useCallback(async () => {
     if (!isLoggedIn) {
       setItems([]);
@@ -127,12 +125,12 @@ export default function SupportPanel({ toast }) {
     <div className="panel support-panel" style={{ maxWidth: 560 }}>
       <h2>联系与反馈</h2>
       <p className="hint">
-        使用问题、账号与上架相关，可通过下方方式联系我们，或提交应用内反馈。
+        您好，使用过程中有什么问题，或有什么建议，可通过下方联系方式联系我们，或提交应用内反馈，非常感谢您对醍醐的支持，愿在您的督促下，我们的未来会更好。
       </p>
       <div className="settings-list">
-        <div className="row">
-          <span>邮箱</span>
-          <a className="sub" href={`mailto:${SUPPORT_EMAIL}`}>
+        <div className="row support-email-row">
+          <span className="support-email-label">邮箱</span>
+          <a className="sub support-email-value" href={`mailto:${SUPPORT_EMAIL}`}>
             {SUPPORT_EMAIL}
           </a>
         </div>
@@ -140,12 +138,10 @@ export default function SupportPanel({ toast }) {
           <span>提交反馈</span>
           <span className="sub">意见与问题</span>
         </button>
-        {download ? (
-          <a href={download} target="_blank" rel="noreferrer">
-            <span>{appDownloadHint()}</span>
-            <span className="sub">下载</span>
-          </a>
-        ) : null}
+        <a href="/download">
+          <span>{appDownloadHint()}</span>
+          <span className="sub">下载页</span>
+        </a>
       </div>
     </div>
   );

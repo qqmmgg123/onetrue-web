@@ -66,11 +66,23 @@ export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const noteId = String(body.noteId || "").trim();
   const text = String(body.body || "").trim();
-  const noteOwnerId = String(body.noteOwnerId || "").trim();
+  let noteOwnerId = String(body.noteOwnerId || "").trim();
   const parentId = String(body.parentId || "").trim();
   const replyToUserId = String(body.replyToUserId || "").trim();
   if (!noteId || !text) {
     return NextResponse.json({ error: "评点不能为空" }, { status: 400 });
+  }
+  // 客户端未带 owner 时从 notes 补全，避免留言通知写不进去
+  if (!noteOwnerId) {
+    try {
+      const notes = await restGet(
+        `/notes?select=owner_id&id=eq.${encodeURIComponent(noteId)}&limit=1`,
+        { accessToken: token },
+      );
+      noteOwnerId = String(
+        (Array.isArray(notes) ? notes[0] : notes)?.owner_id || "",
+      ).trim();
+    } catch (_) {}
   }
   const payload = {
     note_id: noteId,
@@ -112,22 +124,33 @@ export async function POST(request) {
     }
   } catch (_) {}
 
-  const notifyUid = replyToUserId || noteOwnerId;
-  if (notifyUid && notifyUid !== user.id) {
+  // 留言：顶层评点 → 文章作者；回复：仅明确回书对象（不含落在别人评点上的旁支）
+  let notifyUid = "";
+  let kind = "";
+  if (!parentId) {
+    kind = "comment";
+    notifyUid = noteOwnerId;
+  } else if (replyToUserId) {
+    kind = "reply";
+    notifyUid = replyToUserId;
+  }
+  if (notifyUid && notifyUid !== user.id && kind) {
     try {
-      await restPost(
-        "/social_notifications",
-        {
-          user_id: notifyUid,
-          actor_id: user.id,
-          kind: parentId ? "reply" : "comment",
-          note_id: noteId,
-          comment_id: row?.id,
-          body: text.length > 80 ? `${text.slice(0, 80)}…` : text,
-        },
-        { accessToken: token, prefer: "return=minimal" },
-      );
-    } catch (_) {}
+      const notif = {
+        user_id: notifyUid,
+        actor_id: user.id,
+        kind,
+        note_id: noteId,
+        body: text.length > 80 ? `${text.slice(0, 80)}…` : text,
+      };
+      if (row?.id) notif.comment_id = row.id;
+      await restPost("/social_notifications", notif, {
+        accessToken: token,
+        prefer: "return=minimal",
+      });
+    } catch (e) {
+      console.error("social_notifications insert failed", e?.message || e);
+    }
   }
 
   const me = await fetchProfileServer(user.id, token);

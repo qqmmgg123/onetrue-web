@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { appDownloadHint, appDownloadUrl } from "../lib/site";
+import { appDownloadHint } from "../lib/site";
 import { useAuth } from "./AuthProvider";
 import { IconMenu } from "./icons";
 import UserAvatar from "./UserAvatar";
@@ -19,7 +19,6 @@ export default function AppHeader({
   const { isLoggedIn, profile, user, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
-  const download = appDownloadUrl();
   const downloadHint = appDownloadHint();
   const displayName =
     profile?.displayName || profile?.nickname || user?.email || "用户";
@@ -60,15 +59,13 @@ export default function AppHeader({
         </a>
       </div>
       <div className="app-top-header-right">
-        {download ? (
-          <a
-            className="btn ghost app-top-download"
-            href="/download"
-            title={downloadHint}
-          >
-            下载 App
-          </a>
-        ) : null}
+        <a
+          className="btn ghost app-top-download"
+          href="/download"
+          title={downloadHint || "下载醍醐 App"}
+        >
+          下载 App
+        </a>
         {isLoggedIn ? (
           <div className="app-top-user" ref={menuRef}>
             <button
