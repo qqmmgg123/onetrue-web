@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DEFAULT_APP_DOWNLOAD_URL } from "../lib/site";
 
 function isWeChatUA(ua = "") {
   return /MicroMessenger/i.test(ua);
@@ -29,7 +30,7 @@ function buildAndroidIntent({ openScheme, androidPackage, fallbackUrl }) {
 }
 
 /**
- * 下载落地页（对齐电鸭式）：
+ * 下载落地页：
  * - 普通浏览器：点安装 → 下 APK；Android 优先 Intent（已装则打开）
  * - 微信内：顶部提示 + 点安装弹出「用浏览器打开」引导
  */
@@ -45,6 +46,7 @@ export default function DownloadAppPage({
   const [guideOpen, setGuideOpen] = useState(false);
   const [meta, setMeta] = useState(null);
   const [selfUrl, setSelfUrl] = useState(pageUrl || "");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setUa(navigator.userAgent || "");
@@ -54,23 +56,33 @@ export default function DownloadAppPage({
   }, [pageUrl]);
 
   useEffect(() => {
-    if (!manifestUrl) return undefined;
+    const urls = [manifestUrl, "http://storage.otrue.top/app/version.json"].filter(
+      (u, i, arr) => u && arr.indexOf(u) === i,
+    );
+    if (!urls.length) return undefined;
     let alive = true;
     (async () => {
-      try {
-        const res = await fetch(manifestUrl, { cache: "no-store" });
-        if (!res.ok) return;
-        const json = await res.json();
-        if (!alive) return;
-        setMeta({
-          versionName: String(json.versionName || json.version_name || "").trim(),
-          versionCode: json.versionCode ?? json.version_code ?? "",
-          changelog: String(json.changelog || json.notes || "").trim(),
-          updatedAt: String(json.updatedAt || json.updated_at || json.time || "").trim(),
-          size: String(json.size || json.apkSize || "").trim(),
-          apkUrl: String(json.apkUrl || json.apk_url || "").trim(),
-        });
-      } catch (_) {}
+      for (const url of urls) {
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) continue;
+          const json = await res.json();
+          if (!alive) return;
+          setMeta({
+            versionName: String(json.versionName || json.version_name || "").trim(),
+            versionCode: json.versionCode ?? json.version_code ?? "",
+            changelog: String(json.changelog || json.notes || "").trim(),
+            updatedAt: String(
+              json.publishedAt || json.updatedAt || json.updated_at || json.time || "",
+            ).trim(),
+            size: String(json.size || json.apkSize || "").trim(),
+            apkUrl: String(json.apkUrl || json.apk_url || "").trim(),
+          });
+          return;
+        } catch (_) {
+          /* try next */
+        }
+      }
     })();
     return () => {
       alive = false;
@@ -80,8 +92,15 @@ export default function DownloadAppPage({
   const inWeChat = useMemo(() => isWeChatUA(ua), [ua]);
   const onAndroid = useMemo(() => isAndroidUA(ua), [ua]);
   const onMobile = useMemo(() => isMobileUA(ua), [ua]);
-  const downloadHref = (meta?.apkUrl || apkUrl || "").trim();
+
+  const downloadHref = (
+    meta?.apkUrl ||
+    apkUrl ||
+    DEFAULT_APP_DOWNLOAD_URL ||
+    ""
+  ).trim();
   const qrTarget = selfUrl || pageUrl || downloadHref;
+  const canInstall = Boolean(downloadHref);
 
   const qrSrc = useMemo(() => {
     if (!qrTarget) return "";
@@ -90,20 +109,14 @@ export default function DownloadAppPage({
 
   const startDownload = useCallback(() => {
     if (!downloadHref) return;
-    const a = document.createElement("a");
-    a.href = downloadHref;
-    a.rel = "noopener";
-    a.download = "";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    // 跨域 APK：location 跳转比 <a download> 更稳
+    window.location.assign(downloadHref);
   }, [downloadHref]);
 
   const tryOpenApp = useCallback(() => {
     if (!openScheme) return false;
     const t0 = Date.now();
     const timer = window.setTimeout(() => {
-      // 仍停在本页 → 多半未安装或被拦截，回落到下载
       if (Date.now() - t0 < 2800 && !document.hidden) {
         startDownload();
       }
@@ -117,31 +130,34 @@ export default function DownloadAppPage({
     return true;
   }, [openScheme, startDownload]);
 
-  const onInstallClick = () => {
-    if (!downloadHref) return;
+  const onInstallClick = (e) => {
+    e.preventDefault();
+    if (!downloadHref || busy) return;
+    setBusy(true);
+    window.setTimeout(() => setBusy(false), 2500);
+
     if (inWeChat) {
       setGuideOpen(true);
+      setBusy(false);
       return;
     }
     if (onAndroid) {
-      // Intent：已安装打开；未安装走 fallback 下载（Chrome 系）
       const intent = buildAndroidIntent({
         openScheme,
         androidPackage,
         fallbackUrl: downloadHref,
       });
-      window.location.href = intent;
-      // 部分 WebView 不认 Intent，稍后再尝试直链
+      // Intent 可能被拦截：先下发直链兜底，再尝试 Intent
       window.setTimeout(() => {
         if (!document.hidden) startDownload();
-      }, 2200);
+      }, 1800);
+      try {
+        window.location.href = intent;
+      } catch (_) {
+        startDownload();
+      }
       return;
     }
-    if (onMobile) {
-      startDownload();
-      return;
-    }
-    // 桌面：提示扫码；仍允许直接下 APK
     startDownload();
   };
 
@@ -187,14 +203,19 @@ export default function DownloadAppPage({
           )}
         </div>
 
-        <button
-          type="button"
-          className="dl-install-btn"
-          disabled={!downloadHref}
+        <a
+          className={`dl-install-btn${busy ? " is-busy" : ""}`}
+          href={canInstall ? downloadHref : undefined}
+          role="button"
+          aria-disabled={!canInstall || busy}
           onClick={onInstallClick}
         >
-          安装
-        </button>
+          {busy ? "正在跳转…" : "安装"}
+        </a>
+
+        {!canInstall ? (
+          <p className="dl-hint">暂未配置安装包地址，请稍后再试</p>
+        ) : null}
 
         {!inWeChat && onAndroid && openScheme ? (
           <button type="button" className="dl-open-link" onClick={tryOpenApp}>

@@ -1,5 +1,10 @@
 import DownloadAppPage from "../../components/DownloadAppPage";
-import { appDownloadHint, appDownloadUrl, siteOrigin } from "../../lib/site";
+import {
+  appDownloadHint,
+  appDownloadUrl,
+  appUpdateManifestUrl,
+  siteOrigin,
+} from "../../lib/site";
 
 export const metadata = {
   title: "下载醍醐 App",
@@ -11,17 +16,7 @@ export default function DownloadPage() {
   const hint = appDownloadHint();
   const origin = (siteOrigin() || "").replace(/\/+$/, "");
   const pageUrl = origin ? `${origin}/download` : "/download";
-  // version.json 与 APK 同目录
-  let manifestUrl = "";
-  try {
-    if (apkUrl) {
-      const u = new URL(apkUrl);
-      u.pathname = u.pathname.replace(/[^/]+$/, "version.json");
-      manifestUrl = u.toString();
-    }
-  } catch (_) {
-    manifestUrl = "";
-  }
+  const manifestUrl = appUpdateManifestUrl(apkUrl);
 
   return (
     <DownloadAppPage
